@@ -142,6 +142,9 @@ const APPROACH = {
   Neutral: "On the fence. Re-open with a sharp, specific value prop or a limited-time hook — give them a reason to act now, not \"someday.\"",
   Skeptical: "They have doubts. Lead with social proof (\"three of your neighbors just switched\") and a low-commitment next step. Lower the risk, don't push harder.",
   Hostile: "Low ROI — don't burn energy chasing. A short, polite text leaves the door open without the friction of another knock.",
+  // Interest-level tags (new one-tap chips):
+  Maybe: "On the fence. Re-open with one sharp benefit and a low-pressure next step — a quick demo or a no-commitment quote. Give them a reason to act now.",
+  Unlikely: "Long shot. Don't over-invest — a short, friendly text keeps the door open without burning your energy chasing it.",
 };
 
 const OBJECTIONS = [
@@ -238,18 +241,25 @@ function generateCoachInsights() {
     else tips.push(["✅", "Goal crushed", `${todays} stop backs today — past your goal of ${goal}. You're hot; keep knocking.`]);
   }
 
+  // Tag = interest (new one-tap chips) or legacy demeanor on older leads.
+  const tagOf = (l) => l.interest || l.demeanor || "";
+
   if (open.length) {
     const counts = {};
-    open.forEach((l) => (counts[l.demeanor] = (counts[l.demeanor] || 0) + 1));
-    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    open.forEach((l) => { const t = tagOf(l); if (t) counts[t] = (counts[t] || 0) + 1; });
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const top = entries.length ? entries[0][0] : "";
     if (APPROACH[top]) tips.push(["🧠", `Working your "${top}" leads`, APPROACH[top]]);
   }
 
   if (sales.length) {
     const counts = {};
-    sales.forEach((l) => (counts[l.demeanor] = (counts[l.demeanor] || 0) + 1));
-    const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-    tips.push(["💡", "Your money pattern", `Most of your sales came from "${best}" leads. When you tag someone ${best}, treat them as priority — re-contact them first.`]);
+    sales.forEach((l) => { const t = tagOf(l); if (t) counts[t] = (counts[t] || 0) + 1; });
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (entries.length) {
+      const best = entries[0][0];
+      tips.push(["💡", "Your money pattern", `Most of your sales came from "${best}" leads. When you tag someone ${best}, treat them as priority — re-contact them first.`]);
+    }
   }
 
   const stale = open.filter((l) => Date.now() - new Date(l.createdAt).getTime() > 3 * 86400000);
@@ -544,7 +554,8 @@ function renderLeads() {
       ${l.notes ? `<div class="lead-notes">${escapeHtml(l.notes)}</div>` : ""}
       <div class="lead-badges">
         ${statusBadge}
-        <span class="badge demeanor">${escapeHtml(l.demeanor)}</span>
+        ${l.interest ? `<span class="badge interest-${l.interest.toLowerCase()}">${escapeHtml(l.interest)}</span>` : ""}
+        ${l.demeanor ? `<span class="badge demeanor">${escapeHtml(l.demeanor)}</span>` : ""}
         ${l.callback ? `<span class="badge callback">📞 ${formatDateShort(l.callback)}</span>` : ""}
       </div>
       <div class="lead-actions">
@@ -644,7 +655,8 @@ function addLead(e) {
     name,
     phone,
     address: document.getElementById("f-address").value.trim(),
-    demeanor: document.getElementById("f-demeanor").value,
+    demeanor: "",                                       // legacy field, kept for old data
+    interest: document.getElementById("f-interest").value || "", // Interested | Maybe | Unlikely
     notes: document.getElementById("f-notes").value.trim(),
     callback: document.getElementById("f-callback").value || "",
     status: "stopback",
@@ -654,7 +666,28 @@ function addLead(e) {
   markActiveToday();
   render();
   e.target.reset();
+  clearInterestChips();
   document.getElementById("f-name").focus();
+}
+
+// Tapping an interest chip: highlight it, store the value, and — if the note is
+// empty — drop the word in so a rep can log with a single tap.
+const INTEREST_WORDS = ["Interested", "Maybe", "Unlikely"];
+function selectInterest(chip) {
+  const value = chip.dataset.interest;
+  document.querySelectorAll(".interest-chips .chip").forEach((c) =>
+    c.classList.toggle("active", c === chip)
+  );
+  document.getElementById("f-interest").value = value;
+  // Fill the note if it's empty — or still just a previously-tapped chip word.
+  const notes = document.getElementById("f-notes");
+  const current = notes.value.trim();
+  if (!current || INTEREST_WORDS.includes(current)) notes.value = value;
+}
+
+function clearInterestChips() {
+  document.querySelectorAll(".interest-chips .chip").forEach((c) => c.classList.remove("active"));
+  document.getElementById("f-interest").value = "";
 }
 
 function toggleStatus(id, status) {
@@ -922,6 +955,9 @@ function init() {
   });
 
   document.getElementById("lead-form").addEventListener("submit", addLead);
+  document.querySelectorAll(".interest-chips .chip").forEach((chip) =>
+    chip.addEventListener("click", () => selectInterest(chip))
+  );
   document.getElementById("tally-plus").addEventListener("click", () => bumpTally(1));
   document.getElementById("tally-minus").addEventListener("click", () => bumpTally(-1));
   document.getElementById("search").addEventListener("input", renderLeads);

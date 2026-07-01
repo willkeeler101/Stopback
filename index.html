@@ -91,18 +91,17 @@
         <label>House address
           <input type="text" id="f-address" placeholder="123 Maple St" />
         </label>
-        <label>Demeanor
-          <select id="f-demeanor">
-            <option value="Friendly">Friendly</option>
-            <option value="Interested">Interested</option>
-            <option value="Neutral">Neutral</option>
-            <option value="Skeptical">Skeptical</option>
-            <option value="Hostile">Hostile</option>
-          </select>
-        </label>
-        <label>Notes
-          <textarea id="f-notes" rows="2" placeholder="What did they say? Best time to come back? Kids/pets/etc."></textarea>
-        </label>
+        <label class="big-label" for="f-notes">How'd it go?</label>
+        <textarea id="f-notes" class="notes-big" rows="3" placeholder="Quick note — what did they say?"></textarea>
+
+        <!-- One-tap interest. Tapping fills the note if it's empty. -->
+        <input type="hidden" id="f-interest" />
+        <div class="interest-chips" role="group" aria-label="How likely are they?">
+          <button type="button" class="chip interested" data-interest="Interested">Interested</button>
+          <button type="button" class="chip maybe" data-interest="Maybe">Maybe</button>
+          <button type="button" class="chip unlikely" data-interest="Unlikely">Unlikely</button>
+        </div>
+
         <label>Call back on (optional)
           <input type="date" id="f-callback" />
         </label>

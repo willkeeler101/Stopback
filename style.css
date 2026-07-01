@@ -9,6 +9,8 @@
   --green-deep: #234f33;
   --red:     #9b2226;   /* dark red — missed */
   --red-deep:#7d1d20;
+  --amber:     #b9791f; /* warm amber — "maybe" */
+  --amber-deep:#8a5810;
   --line:    #d8c8a4;   /* borders on paper */
   --radius: 16px;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
@@ -247,6 +249,56 @@ input, select, textarea, .search {
 input:focus, select:focus, textarea:focus, .search:focus { outline: none; border-color: var(--green); }
 textarea { resize: vertical; }
 
+/* ===== "How'd it go?" prominent notes + interest chips ===== */
+/* scoped under .form so it beats the generic `.form label` rule */
+.form .big-label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+}
+.notes-big {
+  font-size: 18px;                 /* required minimum */
+  line-height: 1.4;
+  min-height: 4.6rem;              /* ~3 rows */
+  color: var(--ink);
+  border: 2px solid var(--ink-soft);
+  border-radius: 12px;
+  margin-bottom: 0.8rem;
+}
+.notes-big::placeholder { color: var(--ink-soft); }
+.notes-big:focus { border-color: var(--green); }
+
+.interest-chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.chip {
+  min-height: 52px;                /* big one-handed tap target */
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.05s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.chip:active { transform: scale(0.97); }
+/* tinted idle states so the color meaning reads at a glance */
+.chip.interested { border-color: var(--green); color: var(--green-deep); }
+.chip.maybe { border-color: var(--amber); color: var(--amber-deep); }
+.chip.unlikely { border-color: var(--red); color: var(--red-deep); }
+/* selected = filled, high contrast */
+.chip.interested.active { background: var(--green); color: #fff; }
+.chip.maybe.active { background: var(--amber); color: #fff; }
+.chip.unlikely.active { background: var(--red); color: #fff; }
+
 button.primary {
   background: var(--green); color: var(--paper); border: none; border-radius: 10px;
   padding: 0.85rem 1rem; font-size: 1rem; font-weight: 700; cursor: pointer; width: 100%;
@@ -280,6 +332,9 @@ button.ghost:hover { border-color: var(--green); color: var(--green-deep); }
 .badge.sale { background: var(--green); color: var(--paper); }
 .badge.missed { background: rgba(155,34,38,0.12); color: var(--red); border-color: var(--red); }
 .badge.demeanor { background: var(--paper-3); color: var(--ink-soft); border-color: var(--line); }
+.badge.interest-interested { background: rgba(47,107,67,0.14); color: var(--green-deep); border-color: var(--green); }
+.badge.interest-maybe { background: rgba(185,121,31,0.16); color: var(--amber-deep); border-color: var(--amber); }
+.badge.interest-unlikely { background: rgba(155,34,38,0.10); color: var(--red); border-color: var(--red); }
 .lead-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.7rem; }
 .lead-actions button {
   flex: 1; min-width: 70px; background: var(--paper); color: var(--ink);
