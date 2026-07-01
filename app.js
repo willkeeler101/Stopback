@@ -1424,10 +1424,19 @@ function switchView(view) {
 // =====================================================================
 //  Init
 // =====================================================================
-function init() {
+
+// Loads data and paints the app. Called by the auth layer once a rep is
+// signed in (Phase 2). For now it still reads from localStorage; the Supabase
+// data layer swaps in behind this same entry point in the next commit.
+function startApp() {
   load();
   initGamify(); // sync earned badges silently — no celebration on page load
+  render();
+}
 
+// Wires DOM event listeners exactly once, before auth decides which screen
+// to show. Safe to run while logged out (the app views are just hidden).
+function wireEvents() {
   document.getElementById("today-label").textContent = new Date().toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -1513,8 +1522,14 @@ function init() {
   document.getElementById("open-friends").addEventListener("click", () => switchView("friends"));
   document.getElementById("friends-back").addEventListener("click", () => switchView("profile"));
   document.getElementById("friend-form").addEventListener("submit", addFriend);
-
-  render();
 }
 
-init();
+// Boot: wire listeners once, then hand off to the auth layer, which routes to
+// the sign-in screen, onboarding, or the app (calling startApp when ready).
+function boot() {
+  wireEvents();
+  if (window.Auth) Auth.begin(startApp);
+  else startApp(); // safety fallback if the auth script didn't load
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();

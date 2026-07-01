@@ -2,3 +2,6 @@
 .DS_Store
 Thumbs.db
 *.log
+
+# Local Supabase keys (copy config.example.js -> config.js)
+config.js

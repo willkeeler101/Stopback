@@ -14,12 +14,55 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="app-header">
+  <!-- ===================== AUTH SCREEN ===================== -->
+  <div class="auth-screen" id="auth-screen" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">Stop<span class="dot">·</span>Back</div>
+      <p class="auth-tag">Your door-to-door sales sidekick.</p>
+      <form id="auth-form" class="auth-form">
+        <label>Email
+          <input type="email" id="auth-email" autocomplete="email" required />
+        </label>
+        <label>Password
+          <input type="password" id="auth-password" autocomplete="current-password" minlength="6" required />
+        </label>
+        <p class="auth-error" id="auth-error" hidden></p>
+        <button class="primary" type="submit" id="auth-submit">Sign in</button>
+      </form>
+      <p class="auth-toggle">
+        <span id="auth-toggle-text">New here?</span>
+        <button type="button" class="linkish" id="auth-toggle-btn">Create an account</button>
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== ONBOARDING SCREEN ===================== -->
+  <div class="auth-screen" id="onboarding-screen" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">Welcome 👋</div>
+      <p class="auth-tag">Set up your rep profile.</p>
+      <form id="onboarding-form" class="auth-form">
+        <label>Username <span class="auth-hint">friends find you by this</span>
+          <input type="text" id="ob-username" pattern="[A-Za-z0-9_]{3,20}" placeholder="willk" required />
+        </label>
+        <label>Your name
+          <input type="text" id="ob-name" placeholder="Will Keeler" required />
+        </label>
+        <label>Daily stop-back goal
+          <input type="number" id="ob-goal" min="1" value="5" required />
+        </label>
+        <p class="auth-error" id="ob-error" hidden></p>
+        <button class="primary" type="submit">Start selling</button>
+      </form>
+    </div>
+  </div>
+
+  <header class="app-header" hidden>
     <span class="wordmark">Stop<span class="dot">·</span>Back</span>
     <span class="header-date" id="today-label"></span>
   </header>
 
-  <main class="container">
+  <main class="container" hidden>
 
     <!-- ===================== FEED (FOR YOU) VIEW ===================== -->
     <section class="view" id="view-feed">
@@ -265,6 +308,12 @@
         </div>
         <button class="ghost full" id="export-csv" type="button">Export leads to CSV (opens in Excel)</button>
       </div>
+
+      <div class="card">
+        <h2 class="card-title">Account</h2>
+        <p class="muted small" id="account-email">—</p>
+        <button class="ghost full" id="logout-btn" type="button">Sign out</button>
+      </div>
     </section>
 
     <!-- ===================== FRIENDS VIEW ===================== -->
@@ -346,7 +395,7 @@
   </div>
 
   <!-- ===================== BOTTOM NAV ===================== -->
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" hidden>
     <button class="nav-btn active" data-view="feed">
       <span class="bubble">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15.6l-1.7-4.6L6 9.3l4.3-1.7z"/><path d="M18.5 14l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>
@@ -383,6 +432,11 @@
     </button>
   </nav>
 
+  <!-- Supabase client + auth (Phase 2). config.js holds your keys (gitignored). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="auth.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
