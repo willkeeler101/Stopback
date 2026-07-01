@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f2e8d2" />
+  <title>StopBack — D2D Sales Tracker</title>
+
+  <!-- Signature display font (Fraunces) + readable body font (Inter) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800;9..144,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <span class="wordmark">Stop<span class="dot">·</span>Back</span>
+    <span class="header-date" id="today-label"></span>
+  </header>
+
+  <main class="container">
+
+    <!-- ===================== FEED (FOR YOU) VIEW ===================== -->
+    <section class="view" id="view-feed">
+      <div class="feed-head">
+        <div>
+          <h1 class="view-title" id="feed-greeting">Welcome back</h1>
+          <p class="view-sub">Your For You page</p>
+        </div>
+        <div class="streak-chip" title="Day streak">
+          <span class="streak-flame">🔥</span><strong id="streak-num">0</strong>
+        </div>
+      </div>
+      <!-- The whole scrollable feed is built here by app.js -->
+      <div class="feed-stream" id="feed-stream"></div>
+    </section>
+
+    <!-- ===================== LEADS VIEW ===================== -->
+    <section class="view" id="view-leads" hidden>
+      <h1 class="view-title">Leads</h1>
+      <p class="view-sub">Everyone whose number you got.</p>
+      <input type="search" id="search" class="search" placeholder="Search name, address, notes…" />
+      <ul class="leads" id="leads-list"></ul>
+      <p class="empty-hint" id="leads-empty">No stop backs yet. Go knock some doors. 🚪</p>
+    </section>
+
+    <!-- ===================== LOG VIEW ===================== -->
+    <section class="view" id="view-log" hidden>
+      <h1 class="view-title">Log</h1>
+      <p class="view-sub">Track your day in the field.</p>
+
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="stat-num" id="stat-contacts">0</span>
+          <span class="stat-label">Contacts</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num green" id="stat-stopbacks">0</span>
+          <span class="stat-label">Stop Backs</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num red" id="stat-missed">0</span>
+          <span class="stat-label">Missed</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num green" id="stat-sales">0</span>
+          <span class="stat-label">Sales</span>
+        </div>
+      </div>
+
+      <div class="quick-tally">
+        <div class="quick-tally-text">
+          <strong>Talked to someone?</strong>
+          <span>Tap when you chat but don't get a number.</span>
+        </div>
+        <div class="quick-tally-buttons">
+          <button class="tally-btn minus" id="tally-minus" type="button" aria-label="Remove a contact">−</button>
+          <button class="tally-btn plus" id="tally-plus" type="button" aria-label="Add a contact">+1</button>
+        </div>
+      </div>
+
+      <form class="card form" id="lead-form">
+        <h2 class="card-title">Add Stop Back</h2>
+        <label>Name
+          <input type="text" id="f-name" placeholder="e.g. John Smith" required />
+        </label>
+        <label>Phone number
+          <input type="tel" id="f-phone" placeholder="(555) 123-4567" required />
+        </label>
+        <label>House address
+          <input type="text" id="f-address" placeholder="123 Maple St" />
+        </label>
+        <label>Demeanor
+          <select id="f-demeanor">
+            <option value="Friendly">Friendly</option>
+            <option value="Interested">Interested</option>
+            <option value="Neutral">Neutral</option>
+            <option value="Skeptical">Skeptical</option>
+            <option value="Hostile">Hostile</option>
+          </select>
+        </label>
+        <label>Notes
+          <textarea id="f-notes" rows="2" placeholder="What did they say? Best time to come back? Kids/pets/etc."></textarea>
+        </label>
+        <label>Call back on (optional)
+          <input type="date" id="f-callback" />
+        </label>
+        <button type="submit" class="primary">Save Stop Back</button>
+      </form>
+    </section>
+
+    <!-- ===================== STATS VIEW ===================== -->
+    <section class="view" id="view-stats" hidden>
+      <h1 class="view-title">Stats</h1>
+      <p class="view-sub">Your numbers, working for you.</p>
+
+      <!-- Highlight cards -->
+      <div class="highlight-grid">
+        <div class="highlight green-bg">
+          <span class="highlight-num" id="h-sales">0</span>
+          <span class="highlight-label">Sales</span>
+        </div>
+        <div class="highlight">
+          <span class="highlight-num" id="h-closerate">0%</span>
+          <span class="highlight-label">Close rate</span>
+        </div>
+        <div class="highlight green-line">
+          <span class="highlight-num" id="h-stopbacks">0</span>
+          <span class="highlight-label">Stop backs</span>
+        </div>
+      </div>
+
+      <!-- Funnel bars -->
+      <div class="card">
+        <h2 class="card-title">Your Funnel</h2>
+        <div class="fbar">
+          <div class="fbar-top"><span>Contacts</span><span id="f-contacts-n">0</span></div>
+          <div class="fbar-track"><div class="fbar-fill ink" id="f-contacts"></div></div>
+        </div>
+        <div class="fbar">
+          <div class="fbar-top"><span>Stop Backs</span><span id="f-stopbacks-n">0</span></div>
+          <div class="fbar-track"><div class="fbar-fill green" id="f-stopbacks"></div></div>
+        </div>
+        <div class="fbar">
+          <div class="fbar-top"><span>Missed Closings</span><span id="f-missed-n">0</span></div>
+          <div class="fbar-track"><div class="fbar-fill red" id="f-missed"></div></div>
+        </div>
+        <div class="fbar">
+          <div class="fbar-top"><span>Sales</span><span id="f-sales-n">0</span></div>
+          <div class="fbar-track"><div class="fbar-fill green-deep" id="f-sales"></div></div>
+        </div>
+      </div>
+
+      <!-- Conversion rates -->
+      <div class="card">
+        <h2 class="card-title">Conversion</h2>
+        <div class="rate-grid">
+          <div class="rate"><span class="rate-num" id="r-stopback">0%</span><span class="rate-label">Stop-back rate</span></div>
+          <div class="rate"><span class="rate-num" id="r-close">0%</span><span class="rate-label">Close rate</span></div>
+          <div class="rate"><span class="rate-num" id="r-overall">0%</span><span class="rate-label">Sales / contact</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PROFILE VIEW ===================== -->
+    <section class="view" id="view-profile" hidden>
+      <h1 class="view-title">Profile</h1>
+      <p class="view-sub">Make StopBack yours.</p>
+
+      <div class="card form">
+        <h2 class="card-title">Your Info</h2>
+        <label>Rep name
+          <input type="text" id="p-name" placeholder="Your name" />
+        </label>
+        <label>Daily stop-back goal
+          <input type="number" id="p-goal" min="1" placeholder="5" />
+        </label>
+      </div>
+
+      <div class="card form">
+        <h2 class="card-title">Import Past Stats</h2>
+        <p class="muted small">Already been grinding before the app? Enter your totals so far. These get added on top of everything you track from here.</p>
+        <div class="baseline-grid">
+          <label>Contacts<input type="number" id="b-contacts" min="0" placeholder="0" /></label>
+          <label>Stop backs<input type="number" id="b-stopbacks" min="0" placeholder="0" /></label>
+          <label>Missed<input type="number" id="b-missed" min="0" placeholder="0" /></label>
+          <label>Sales<input type="number" id="b-sales" min="0" placeholder="0" /></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Lifetime</h2>
+        <div class="record-row"><span>Contacts</span><strong id="p-contacts">0</strong></div>
+        <div class="record-row"><span>Stop backs</span><strong id="p-stopbacks">0</strong></div>
+        <div class="record-row"><span>Sales</span><strong id="p-sales">0</strong></div>
+        <div class="record-row"><span>Active days</span><strong id="p-days">0</strong></div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Friends</h2>
+        <p class="muted small">Add friends to share highlights on each other's For You feed.</p>
+        <button class="ghost" id="open-friends" type="button">Manage Friends →</button>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Products &amp; Brochure</h2>
+        <p class="muted small">Manage the products you sell. (Printable brochure comes next.)</p>
+        <button class="ghost" id="open-products" type="button">Manage Products →</button>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Backup</h2>
+        <p class="muted small">Your data lives on this device only. Export a backup so you never lose your leads.</p>
+        <div class="backup-buttons">
+          <button class="primary" id="export-btn" type="button">Export</button>
+          <button class="ghost" id="import-btn" type="button">Import</button>
+          <input type="file" id="import-file" accept="application/json" hidden />
+        </div>
+        <button class="ghost full" id="export-csv" type="button">Export leads to CSV (opens in Excel)</button>
+      </div>
+    </section>
+
+    <!-- ===================== FRIENDS VIEW ===================== -->
+    <section class="view" id="view-friends" hidden>
+      <button class="back-link" id="friends-back" type="button">← Profile</button>
+      <h1 class="view-title">Friends</h1>
+      <p class="view-sub">Share highlights with your crew.</p>
+
+      <form class="card form" id="friend-form">
+        <h2 class="card-title">Add a Friend</h2>
+        <label>Name
+          <input type="text" id="fr-name" placeholder="e.g. Marcus T." required />
+        </label>
+        <button type="submit" class="primary">Add Friend</button>
+      </form>
+
+      <p class="muted small" id="friends-note">
+        Their highlights are sample data for now — live sharing of real stats arrives with cloud accounts.
+      </p>
+      <ul class="friends" id="friends-list"></ul>
+      <p class="empty-hint" id="friends-empty">No friends added yet. (Two demo friends already appear in your feed.)</p>
+    </section>
+
+    <!-- ===================== PRODUCTS VIEW ===================== -->
+    <section class="view" id="view-products" hidden>
+      <button class="back-link" id="products-back" type="button">← Profile</button>
+      <h1 class="view-title">Products</h1>
+      <p class="view-sub">What you sell — this will feed your brochure.</p>
+
+      <form class="card form" id="product-form">
+        <h2 class="card-title" id="product-form-title">Add Product</h2>
+        <label>Name
+          <input type="text" id="pr-name" placeholder="e.g. Verizon Home Internet" required />
+        </label>
+        <label>Price
+          <input type="text" id="pr-price" placeholder="e.g. $50/mo" />
+        </label>
+        <label>Key features (one per line)
+          <textarea id="pr-features" rows="3" placeholder="Unlimited data&#10;No annual contract&#10;Free installation"></textarea>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="ghost" id="product-cancel" hidden>Cancel</button>
+          <button type="submit" class="primary" id="product-submit">Add Product</button>
+        </div>
+      </form>
+
+      <ul class="products" id="products-list"></ul>
+      <p class="empty-hint" id="products-empty">No products yet. Add what you sell. 📦</p>
+    </section>
+
+  </main>
+
+  <!-- ===================== EDIT LEAD MODAL ===================== -->
+  <div class="modal-overlay" id="edit-modal" hidden>
+    <div class="modal">
+      <h2 class="card-title">Edit Lead</h2>
+      <form id="edit-form" class="form">
+        <input type="hidden" id="e-id" />
+        <label>Name <input type="text" id="e-name" required /></label>
+        <label>Phone number <input type="tel" id="e-phone" required /></label>
+        <label>House address <input type="text" id="e-address" /></label>
+        <label>Demeanor
+          <select id="e-demeanor">
+            <option value="Friendly">Friendly</option>
+            <option value="Interested">Interested</option>
+            <option value="Neutral">Neutral</option>
+            <option value="Skeptical">Skeptical</option>
+            <option value="Hostile">Hostile</option>
+          </select>
+        </label>
+        <label>Notes <textarea id="e-notes" rows="2"></textarea></label>
+        <label>Call back on <input type="date" id="e-callback" /></label>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="edit-cancel">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== BOTTOM NAV ===================== -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="feed">
+      <span class="bubble">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15.6l-1.7-4.6L6 9.3l4.3-1.7z"/><path d="M18.5 14l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>
+      </span>
+      <span class="nav-label">Feed</span>
+    </button>
+
+    <button class="nav-btn" data-view="leads">
+      <span class="bubble">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.7-4.8 5.5-4.8S14.5 16 14.5 19"/><path d="M16 6a3 3 0 010 6M21 19c0-2-1.3-3.5-3.5-4.2"/></svg>
+      </span>
+      <span class="nav-label">Leads</span>
+    </button>
+
+    <button class="nav-btn center" data-view="log">
+      <span class="bubble big">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      </span>
+      <span class="nav-label">Log</span>
+    </button>
+
+    <button class="nav-btn" data-view="stats">
+      <span class="bubble">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>
+      </span>
+      <span class="nav-label">Stats</span>
+    </button>
+
+    <button class="nav-btn" data-view="profile">
+      <span class="bubble">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3.1-5.5 7-5.5s7 2 7 5.5"/></svg>
+      </span>
+      <span class="nav-label">Profile</span>
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
