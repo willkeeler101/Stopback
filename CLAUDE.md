@@ -90,6 +90,19 @@ Holds a single JSON object (the whole `state`). Shape:
   name: "Marcus T."
 }
 ```
+### Key: `stopback-streak-seen`
+A single integer — the last streak value the flame animation celebrated. UI-only
+(so the streak flame pops only when the streak actually increases); NOT app data,
+NOT part of backups.
+
+### Coach engine (Feed)
+`generateCoachMessages()` in `app.js` is a **rules-based** engine (no external
+API): it reads time of day, goal progress, streak, today's stop-backs/sales/
+misses, stop-back rate, and best-converting category, picks a situation, and
+rotates worded variants. There is a clearly marked **PHASE 2** comment block
+above it showing where a real Claude API call slots in later (keep the rules
+version as the offline fallback).
+
 Note: two **demo friends** (`DEMO_FRIENDS` in `app.js`) always appear in the feed
 as sample data — they are constants in code, NOT stored in `state.friends`.
 Friend highlight stats are currently **generated sample data** (real cross-user

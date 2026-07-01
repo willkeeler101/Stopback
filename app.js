@@ -209,66 +209,151 @@ function attachReact(node, id) {
 }
 
 // ---- Post builders (return an element, or null to skip) --------------
-function coachCard(emoji, title, body) {
-  return el(`
+// A coach message rendered as a chat bubble: avatar, timestamp, and (on first
+// load) a typing shimmer that reveals the text after a short, staggered delay.
+function coachCard(text, idx, animate) {
+  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const node = el(`
     <article class="post post-coach">
       <div class="post-head">
         <span class="avatar avatar-ai">✦</span>
-        <div><span class="post-author">StopBack Coach</span><span class="post-tag">AI · just for you</span></div>
+        <div><span class="post-author">StopBack Coach</span><span class="post-tag">${time}</span></div>
       </div>
-      <h3 class="post-title">${emoji} ${escapeHtml(title)}</h3>
-      <p class="post-body">${body}</p>
+      <div class="coach-bubble">
+        <div class="typing"><span></span><span></span><span></span></div>
+        <p class="coach-text" hidden>${text}</p>
+      </div>
     </article>`);
+
+  const reveal = () => {
+    const typing = node.querySelector(".typing");
+    const p = node.querySelector(".coach-text");
+    if (typing) typing.remove();
+    if (p) { p.hidden = false; p.classList.add("reveal"); }
+  };
+
+  if (animate) setTimeout(reveal, 350 + idx * 750);
+  else reveal();
+  return node;
 }
 
-function generateCoachInsights() {
-  const tips = [];
-  const open = state.leads.filter((l) => l.status === "stopback");
-  const sales = state.leads.filter((l) => l.status === "sale");
+// =====================================================================
+//  PHASE 2 — REAL AI COACH (swap point)
+//  Replace generateCoachMessages() below with an async call to the
+//  Claude API (Anthropic). Send the same context we compute here
+//  ({ profile, goal, todaysStats, streak, stopBackRate, bestCategory,
+//  recentLeads }) as the prompt, and stream the reply into the coach
+//  card — the typing shimmer already models the wait. Keep this
+//  rules-based version as the offline fallback (works with no signal).
+// =====================================================================
+
+// Rotates within a situation's pool by day+hour so wording keeps changing.
+function pick(pool, salt) {
+  const i = (dayNumber() * 24 + new Date().getHours() + hashStr(salt)) % pool.length;
+  return pool[i];
+}
+
+// The best-converting tag (interest/demeanor) among the rep's sales.
+function bestCategoryTag() {
+  const counts = {};
+  state.leads.filter((l) => l.status === "sale").forEach((l) => {
+    const t = l.interest || l.demeanor;
+    if (t) counts[t] = (counts[t] || 0) + 1;
+  });
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return entries.length ? entries[0][0] : null;
+}
+
+// Returns 1–3 short coach messages, data-driven and rotated.
+function generateCoachMessages() {
+  const name = escapeHtml((state.profile.name || "").split(" ")[0] || "");
+  const hey = name ? name : "champ";
+  const hour = new Date().getHours();
+  const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
   const goal = state.profile.dailyGoal || 0;
   const today = localDateStr();
-  const todays = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today).length;
+  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
+  const tSB = todayLeads.length;
+  const tSales = todayLeads.filter((l) => l.status === "sale").length;
+  const tMiss = todayLeads.filter((l) => l.status === "missed").length;
+  const streak = currentStreak();
+  const remaining = Math.max(0, goal - tSB);
 
+  // Stop-back rate → how many doors to line up for the doors-needed nudge.
+  let sbRate = contactsTotal() > 0 ? stopbacksTotal() / contactsTotal() : 0.25;
+  sbRate = Math.min(0.9, Math.max(0.12, sbRate));
+  const doors = remaining > 0 ? Math.ceil(remaining / sbRate) : 0;
+  const ratePct = Math.round(sbRate * 100);
+  const best = bestCategoryTag();
+
+  const messages = [];
+
+  // ---- Pick the primary situation (highest priority first) ----
   if (state.leads.length === 0) {
-    tips.push(["🚀", "Get your first stop back", "Knock with one goal: get a name and a number. Don't sell on the doorstep — qualify, build rapport, and set a reason to come back. Hit +1 for every door you talk to."]);
-    tips.push(["🎯", "Stack small wins", `Target ${goal || 5} stop backs today. Numbers in the pipeline beat the perfect pitch.`]);
-    return tips;
+    messages.push(pick([
+      `Fresh start, ${hey}. First move is simple: get one name and one number. That's a stop back — everything builds from there.`,
+      `Blank slate this ${part}. Don't overthink the pitch — knock, be human, get a number. The pipeline starts with one.`,
+      `Zero on the board, ${hey}. Perfect. Go earn your first stop back and I'll help you work it.`,
+    ], "cold"));
+  } else if (tMiss >= 2 && tSales === 0) {
+    messages.push(pick([
+      `Rough patch — ${tMiss} that didn't land. Shake it off, ${hey}. Those aren't losses, they're reps. Next door's clean.`,
+      `${tMiss} misses, no yes yet. That happens to everyone who actually knocks. Reset, breathe, next one.`,
+      `Tough run today. The math still works if you keep swinging — one yes erases the noise.`,
+    ], "rough"));
+  } else if (goal > 0 && tSB >= goal * 1.5) {
+    messages.push(pick([
+      `${tSB} stop backs?! You're on fire, ${hey}. Days like this are where months get made — ride it.`,
+      `Way past goal and still moving. This is record pace. Don't let up now.`,
+      `You're cooking this ${part}. ${tSB} on the board — keep the foot down.`,
+    ], "crush"));
+  } else if (goal > 0 && tSB >= goal) {
+    messages.push(pick([
+      `Goal hit — ${tSB} stop backs. 🔥 Everything from here is bonus. How many extra you got in you?`,
+      `That's your number, ${hey}. Most reps coast now; the great ones keep knocking while they're hot.`,
+      `${tSB}/${goal} — done. Bank it, then steal a few more before you call it.`,
+    ], "hit"));
+  } else if (goal > 0 && remaining <= 2 && tSB > 0) {
+    messages.push(pick([
+      `So close — ${remaining} more and the goal's yours. Don't coast now, ${hey}.`,
+      `${remaining} away. This is where good reps finish. Two more doors.`,
+      `Almost there: ${remaining} to go. Line up the next couple and close it out.`,
+    ], "near"));
+  } else if (goal > 0 && tSB > 0) {
+    messages.push(pick([
+      `${remaining} more to hit goal. You get a number at ~${ratePct}% of doors, so line up about ${doors}. Go.`,
+      `You're at ${tSB}/${goal}, ${hey}. Not behind — just not done. ~${doors} more doors gets you there.`,
+      `${remaining} to go. At your ~${ratePct}% rate that's roughly ${doors} knocks. Tighten the pitch and grind them out.`,
+    ], "behind"));
+  } else {
+    // No stop backs yet today (has history)
+    messages.push(pick([
+      `${part === "morning" ? "Morning" : "Fresh"} reset, ${hey}. ${streak > 0 ? `${streak}-day streak says you know the drill.` : "You've done this before."} Go get today's first number.`,
+      `Nothing logged yet today. First door's the hardest — knock it and the rest follow.`,
+      `Clean slate for today. Line up your first few and let momentum do the work.`,
+    ], "fresh"));
   }
 
-  if (goal > 0) {
-    const remaining = goal - todays;
-    if (remaining > 0) tips.push(["📊", `${remaining} to hit your goal`, `You're at ${todays}/${goal} stop backs today. Line up your next ${remaining} door${remaining > 1 ? "s" : ""} now.`]);
-    else tips.push(["✅", "Goal crushed", `${todays} stop backs today — past your goal of ${goal}. You're hot; keep knocking.`]);
+  // ---- Secondary: your money pattern (if there's a clear one) ----
+  if (best) {
+    messages.push(pick([
+      `Pattern I'm seeing: your sales cluster in your "${best}" leads. Re-touch those first — that's where your money is.`,
+      `Your "${best}" leads convert best for you. Prioritize them today over cold ones.`,
+    ], "best" + best));
   }
 
-  // Tag = interest (new one-tap chips) or legacy demeanor on older leads.
-  const tagOf = (l) => l.interest || l.demeanor || "";
-
-  if (open.length) {
-    const counts = {};
-    open.forEach((l) => { const t = tagOf(l); if (t) counts[t] = (counts[t] || 0) + 1; });
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    const top = entries.length ? entries[0][0] : "";
-    if (APPROACH[top]) tips.push(["🧠", `Working your "${top}" leads`, APPROACH[top]]);
+  // ---- Third: streak protect, or a quick objection rep ----
+  if (streak >= 3) {
+    messages.push(pick([
+      `${streak} days straight. Consistency is the real edge here — protect the streak today.`,
+      `Don't break the chain: ${streak} days and counting. One log keeps it alive.`,
+    ], "streak"));
+  } else {
+    const obj = OBJECTIONS[dayNumber() % OBJECTIONS.length];
+    messages.push(`Quick rep — when they say "${obj.q}": ${obj.a}`);
   }
 
-  if (sales.length) {
-    const counts = {};
-    sales.forEach((l) => { const t = tagOf(l); if (t) counts[t] = (counts[t] || 0) + 1; });
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    if (entries.length) {
-      const best = entries[0][0];
-      tips.push(["💡", "Your money pattern", `Most of your sales came from "${best}" leads. When you tag someone ${best}, treat them as priority — re-contact them first.`]);
-    }
-  }
-
-  const stale = open.filter((l) => Date.now() - new Date(l.createdAt).getTime() > 3 * 86400000);
-  if (stale.length) tips.push(["⏳", `${stale.length} lead${stale.length > 1 ? "s" : ""} going cold`, `You've got ${stale.length} stop back${stale.length > 1 ? "s" : ""} sitting 3+ days. A quick text today revives them before they forget you.`]);
-
-  const obj = OBJECTIONS[dayNumber() % OBJECTIONS.length];
-  tips.push(["🛡️", `Objection drill: "${obj.q}"`, obj.a]);
-
-  return tips;
+  return messages.slice(0, 3);
 }
 
 function callbacksPost() {
@@ -417,7 +502,7 @@ function motivationPost() {
 }
 
 // Circular progress toward today's stop-back goal.
-function goalPost() {
+function goalPost(animate) {
   const goal = state.profile.dailyGoal || 0;
   if (goal <= 0) return null;
   const today = localDateStr();
@@ -432,13 +517,16 @@ function goalPost() {
     ? "Goal crushed — everything from here is bonus. 🔥"
     : `${goal - todays} more stop back${goal - todays > 1 ? "s" : ""} to hit today's goal.`;
 
-  return el(`
+  // Start empty and fill to target so the ring animates on first load.
+  const startOffset = animate ? circ : offset;
+
+  const node = el(`
     <article class="post post-goal">
       <div class="goal-ring">
         <svg viewBox="0 0 80 80">
           <circle class="ring-bg" cx="40" cy="40" r="${r}"></circle>
           <circle class="ring-fg ${done ? "done" : ""}" cx="40" cy="40" r="${r}"
-            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"></circle>
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${startOffset.toFixed(1)}"></circle>
         </svg>
         <div class="goal-ring-center">
           <span class="goal-num">${todays}</span><span class="goal-of">/ ${goal}</span>
@@ -450,6 +538,15 @@ function goalPost() {
         <p class="post-body">${msg}</p>
       </div>
     </article>`);
+
+  if (animate) {
+    const fg = node.querySelector(".ring-fg");
+    // Two rAFs so the browser paints the empty state before transitioning.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => { fg.style.strokeDashoffset = offset.toFixed(1); })
+    );
+  }
+  return node;
 }
 
 // Round-robin merge so the feed mixes coach / you / friends.
@@ -460,23 +557,29 @@ function interleave(...lists) {
   return out;
 }
 
+// Animations (typing, card enter, ring fill) play on the FIRST feed build only,
+// so later re-renders (after logging, liking, etc.) don't re-type or re-jump.
+let feedAnimated = false;
+
 function renderFeed() {
   const name = state.profile.name ? state.profile.name.split(" ")[0] : "there";
   const hour = new Date().getHours();
   const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   document.getElementById("feed-greeting").textContent = `${part}, ${name} 👋`;
   document.getElementById("streak-num").textContent = currentStreak();
+  maybeAnimateStreak();
 
+  const animate = !feedAnimated;
   const stream = document.getElementById("feed-stream");
   stream.innerHTML = "";
 
-  const coach = generateCoachInsights().map((t) => coachCard(t[0], t[1], t[2]));
+  const coach = generateCoachMessages().map((m, i) => coachCard(m, i, animate));
   const friends = friendPosts();
   const highlights = yourHighlightPosts();
 
   // Actionable stuff first, then an interleaved social mix.
   const posts = [
-    goalPost(),
+    goalPost(animate),
     callbacksPost(),
     coach[0],
     hitListPost(),
@@ -485,7 +588,29 @@ function renderFeed() {
     motivationPost(),
   ].filter(Boolean);
 
-  posts.forEach((p) => stream.appendChild(p));
+  posts.forEach((p, i) => {
+    if (animate) {
+      p.classList.add("enter");
+      p.style.animationDelay = i * 60 + "ms";
+    }
+    stream.appendChild(p);
+  });
+
+  feedAnimated = true;
+}
+
+// Pop the streak flame only when the streak actually goes up (tracked across
+// sessions via a tiny localStorage value, separate from app data).
+function maybeAnimateStreak() {
+  const cur = currentStreak();
+  const seen = +(localStorage.getItem("stopback-streak-seen") || 0);
+  const chip = document.querySelector(".streak-chip");
+  if (chip && cur > seen) {
+    chip.classList.remove("pop");
+    void chip.offsetWidth; // restart the animation
+    chip.classList.add("pop");
+  }
+  localStorage.setItem("stopback-streak-seen", cur);
 }
 
 // Most stop backs logged in a single calendar day.
