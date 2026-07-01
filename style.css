@@ -586,6 +586,43 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .goal-text .post-title { margin: 0.1rem 0; }
 .goal-text .post-body { margin: 0; }
 
+/* ===== Gamification: level + XP ===== */
+.level-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.55rem; }
+.level-name { font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; }
+.level-xp { color: var(--ink-soft); font-weight: 700; }
+.level-track { height: 12px; background: var(--paper-3); border-radius: 999px; overflow: hidden; }
+.level-fill {
+  height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--green), var(--green-deep));
+  border-radius: 999px; transition: width 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.level-next { margin-top: 0.45rem; margin-bottom: 0; }
+
+/* ===== Gamification: badges ===== */
+.badge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
+.badge-item {
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 0.75rem 0.6rem; text-align: center; background: var(--paper);
+}
+.badge-item.earned { border-color: var(--green); box-shadow: 0 2px 8px rgba(47, 107, 67, 0.12); }
+.badge-item.locked { opacity: 0.5; filter: grayscale(0.85); }
+.badge-icon { font-size: 1.7rem; display: block; line-height: 1; }
+.badge-name { display: block; font-family: var(--font-display); font-weight: 800; font-size: 0.9rem; margin-top: 0.3rem; }
+.badge-desc { display: block; font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.15rem; }
+
+/* ===== Feed: streak-at-risk card ===== */
+.post-risk { border-left: 4px solid var(--amber); }
+
+/* ===== Milestone confetti + toast (non-blocking) ===== */
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 100; overflow: hidden; }
+.confetti-piece { position: absolute; width: 8px; height: 8px; border-radius: 2px; will-change: transform, opacity; }
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+  background: var(--ink); color: var(--paper);
+  padding: 0.6rem 1rem; border-radius: 999px; font-weight: 700; font-size: 0.9rem;
+  box-shadow: 0 6px 20px rgba(33, 28, 22, 0.25); pointer-events: none; z-index: 101;
+}
+
 /* ===== Bottom nav — compact bubble icons ===== */
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0;

@@ -52,9 +52,21 @@ Holds a single JSON object (the whole `state`). Shape:
   },
   products: [Product],     // things the rep sells (for the future brochure)
   friends: [Friend],       // friends added to share highlights with
-  likes: { "like:<postId>": true }  // map of feed posts the rep reacted to
+  likes: { "like:<postId>": true }, // map of feed posts the rep reacted to
+  gamify: {                // motivation layer (XP is DERIVED, not stored here)
+    badges: { badgeId: "YYYY-MM-DD" }, // earned badges (value = date or "earned")
+    goalHitDate: "",       // last date the daily-goal confetti fired
+    lastStreakCelebrated: 0, // highest round-number streak already celebrated
+    streakSeen: 0          // last streak value the flame pop animated
+  }
 }
 ```
+
+**XP & levels are derived** from the data (see `computeXP()` / `LEVELS` in
+`app.js`) — effort-weighted (contact +5, stop back +15, missed +10, sale +40,
+active day +10) so imported/existing stats already count and nothing resets.
+Badges (`BADGES` in `app.js`) are checked against live data; `gamify.badges`
+records which have been earned so celebrations fire once.
 
 ### Lead
 ```js
@@ -90,11 +102,6 @@ Holds a single JSON object (the whole `state`). Shape:
   name: "Marcus T."
 }
 ```
-### Key: `stopback-streak-seen`
-A single integer — the last streak value the flame animation celebrated. UI-only
-(so the streak flame pops only when the streak actually increases); NOT app data,
-NOT part of backups.
-
 ### Coach engine (Feed)
 `generateCoachMessages()` in `app.js` is a **rules-based** engine (no external
 API): it reads time of day, goal progress, streak, today's stop-backs/sales/

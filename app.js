@@ -17,6 +17,8 @@ const DEFAULT_STATE = {
   products: [],            // things you sell (for the brochure)
   friends: [],             // people you've added to share highlights with
   likes: {},               // which feed posts you've reacted to
+  // Motivation layer (XP is derived; this tracks celebrations + earned badges).
+  gamify: { badges: {}, goalHitDate: "", lastStreakCelebrated: 0, streakSeen: 0 },
 };
 
 let editingProductId = null; // null = the product form is in "add" mode
@@ -32,6 +34,8 @@ function load() {
     state.profile = { ...DEFAULT_STATE.profile, ...(data.profile || {}) };
     state.baseline = { ...DEFAULT_STATE.baseline, ...(data.baseline || {}) };
     state.likes = data.likes || {};
+    state.gamify = { ...DEFAULT_STATE.gamify, ...(data.gamify || {}) };
+    state.gamify.badges = (data.gamify && data.gamify.badges) || {};
   } catch (e) {
     console.error("Could not read saved data:", e);
   }
@@ -88,6 +92,159 @@ function missedTotal() {
 }
 function salesTotal() {
   return base("sales") + countByStatus("sale");
+}
+
+// =====================================================================
+//  MOTIVATION LAYER — XP, levels, badges, celebrations
+// =====================================================================
+function stopbacksToday() {
+  const t = localDateStr();
+  return state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === t).length;
+}
+
+// XP weights — effort (doors/showing up) is rewarded at least as much as outcomes.
+const XP = { contact: 5, stopback: 15, missed: 10, sale: 40, activeDay: 10 };
+
+// XP is DERIVED from your data, so existing + imported stats already count and
+// nothing ever resets. Sales/misses are bonuses layered on top of the stop back.
+function computeXP() {
+  const contactsOnly = state.contactsTally + base("contacts"); // doors with no number
+  return (
+    contactsOnly * XP.contact +
+    stopbacksTotal() * XP.stopback +
+    missedTotal() * XP.missed +
+    salesTotal() * XP.sale +
+    state.activeDays.length * XP.activeDay
+  );
+}
+
+const LEVELS = [
+  { name: "Rookie", xp: 0 },
+  { name: "Door Knocker", xp: 150 },
+  { name: "Dealmaker", xp: 400 },
+  { name: "Closer", xp: 800 },
+  { name: "Top Rep", xp: 1500 },
+  { name: "Rainmaker", xp: 2800 },
+  { name: "Legend", xp: 5000 },
+];
+
+function levelInfo(xp) {
+  let i = 0;
+  for (let k = 0; k < LEVELS.length; k++) if (xp >= LEVELS[k].xp) i = k;
+  const cur = LEVELS[i];
+  const next = LEVELS[i + 1] || null;
+  const frac = next ? (xp - cur.xp) / (next.xp - cur.xp) : 1;
+  return { name: cur.name, cur, next, frac };
+}
+
+// Any single day with 2+ closings and a 50%+ close rate.
+function hasHighCloseDay() {
+  const byDay = {};
+  state.leads.forEach((l) => {
+    const d = localDateStr(new Date(l.createdAt));
+    byDay[d] = byDay[d] || { s: 0, m: 0 };
+    if (l.status === "sale") byDay[d].s++;
+    else if (l.status === "missed") byDay[d].m++;
+  });
+  return Object.values(byDay).some((x) => x.s + x.m >= 2 && x.s / (x.s + x.m) >= 0.5);
+}
+
+const BADGES = [
+  { id: "first_stopback", name: "Getting Started", icon: "🚪", desc: "Log your first stop back", check: () => stopbacksTotal() >= 1 },
+  { id: "first_sale", name: "First Sale", icon: "💰", desc: "Close your first deal", check: () => salesTotal() >= 1 },
+  { id: "streak_7", name: "On Fire", icon: "🔥", desc: "7-day knock streak", check: () => currentStreak() >= 7 },
+  { id: "contacts_100", name: "Century", icon: "💯", desc: "Talk to 100 people", check: () => contactsTotal() >= 100 },
+  { id: "close_day_50", name: "Sharpshooter", icon: "🎯", desc: "50%+ close rate in a day (2+ closings)", check: () => hasHighCloseDay() },
+  { id: "sales_10", name: "Closer's Club", icon: "🏆", desc: "Close 10 deals", check: () => salesTotal() >= 10 },
+];
+
+const STREAK_MILESTONES = [3, 5, 7, 10, 14, 20, 25, 30, 50, 75, 100];
+
+// Silently sync earned badges + "already hit" markers on load (no celebration).
+function initGamify() {
+  const today = localDateStr();
+  BADGES.forEach((b) => {
+    if (!state.gamify.badges[b.id] && b.check()) state.gamify.badges[b.id] = "earned";
+  });
+  const goal = state.profile.dailyGoal || 0;
+  if (goal > 0 && stopbacksToday() >= goal) state.gamify.goalHitDate = today;
+  save();
+}
+
+// Called AFTER a user action. Detects new milestones and celebrates once each.
+function runGamification(opts = {}) {
+  let party = false;
+  const today = localDateStr();
+
+  if (opts.sale) party = true;
+
+  const goal = state.profile.dailyGoal || 0;
+  if (goal > 0 && stopbacksToday() >= goal && state.gamify.goalHitDate !== today) {
+    state.gamify.goalHitDate = today;
+    party = true;
+  }
+
+  const streak = currentStreak();
+  if (STREAK_MILESTONES.includes(streak) && streak > state.gamify.lastStreakCelebrated) {
+    state.gamify.lastStreakCelebrated = streak;
+    party = true;
+    toast(`${streak}-day streak! 🔥`);
+  }
+
+  const newBadges = [];
+  BADGES.forEach((b) => {
+    if (!state.gamify.badges[b.id] && b.check()) {
+      state.gamify.badges[b.id] = today;
+      newBadges.push(b);
+    }
+  });
+
+  save();
+  if (party || newBadges.length) confettiBurst();
+  newBadges.forEach((b, i) => setTimeout(() => toast(`Badge earned: ${b.name} ${b.icon}`), 700 + i * 900));
+}
+
+// Tasteful, non-blocking confetti via the Web Animations API (no libraries).
+function confettiBurst() {
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const colors = ["#2f6b43", "#234f33", "#b9791f", "#9b2226", "#e4d6b6", "#211c16"];
+  const cont = document.createElement("div");
+  cont.className = "confetti";
+  document.body.appendChild(cont);
+  for (let i = 0; i < 28; i++) {
+    const p = document.createElement("div");
+    p.className = "confetti-piece";
+    p.style.background = colors[i % colors.length];
+    p.style.left = "50%";
+    p.style.top = "40%";
+    cont.appendChild(p);
+    const dx = (Math.random() * 2 - 1) * (120 + Math.random() * 160);
+    const dy = 240 + Math.random() * 220;
+    const rot = Math.random() * 720 - 360;
+    p.animate(
+      [
+        { transform: "translate(0,0) rotate(0deg)", opacity: 1 },
+        { transform: `translate(${dx}px,-${80 + Math.random() * 90}px) rotate(${rot / 2}deg)`, opacity: 1, offset: 0.35 },
+        { transform: `translate(${dx * 1.3}px,${dy}px) rotate(${rot}deg)`, opacity: 0 },
+      ],
+      { duration: 1200 + Math.random() * 500, easing: "cubic-bezier(0.2,0.6,0.3,1)", fill: "forwards" }
+    );
+  }
+  setTimeout(() => cont.remove(), 1900);
+}
+
+// Small non-blocking toast.
+function toast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  t.animate([{ opacity: 0, transform: "translate(-50%, 10px)" }, { opacity: 1, transform: "translate(-50%, 0)" }],
+    { duration: 220, fill: "forwards" });
+  setTimeout(() => {
+    const out = t.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, fill: "forwards" });
+    out.onfinish = () => t.remove();
+  }, 2300);
 }
 function pct(part, whole) {
   return whole ? Math.round((part / whole) * 100) + "%" : "0%";
@@ -501,6 +658,20 @@ function motivationPost() {
     </article>`);
 }
 
+// Gentle nudge when a live streak hasn't been fed today.
+function streakRiskPost() {
+  const streak = currentStreak();
+  if (streak <= 0 || state.activeDays.includes(localDateStr())) return null;
+  return el(`
+    <article class="post post-risk">
+      <div class="post-head">
+        <span class="avatar" style="background:var(--amber)">🔥</span>
+        <div><span class="post-author">Streak at risk</span><span class="post-tag">Keep it alive</span></div>
+      </div>
+      <p class="post-body">Log 1 door to keep your <strong>${streak}-day streak</strong> going.</p>
+    </article>`);
+}
+
 // Circular progress toward today's stop-back goal.
 function goalPost(animate) {
   const goal = state.profile.dailyGoal || 0;
@@ -579,6 +750,7 @@ function renderFeed() {
 
   // Actionable stuff first, then an interleaved social mix.
   const posts = [
+    streakRiskPost(),
     goalPost(animate),
     callbacksPost(),
     coach[0],
@@ -603,14 +775,14 @@ function renderFeed() {
 // sessions via a tiny localStorage value, separate from app data).
 function maybeAnimateStreak() {
   const cur = currentStreak();
-  const seen = +(localStorage.getItem("stopback-streak-seen") || 0);
   const chip = document.querySelector(".streak-chip");
-  if (chip && cur > seen) {
+  if (chip && cur > (state.gamify.streakSeen || 0)) {
     chip.classList.remove("pop");
     void chip.offsetWidth; // restart the animation
     chip.classList.add("pop");
   }
-  localStorage.setItem("stopback-streak-seen", cur);
+  state.gamify.streakSeen = cur;
+  save();
 }
 
 // Most stop backs logged in a single calendar day.
@@ -899,6 +1071,26 @@ function renderProfile() {
   document.getElementById("p-sales").textContent = salesTotal();
   document.getElementById("p-days").textContent = state.activeDays.length;
 
+  // Level + XP
+  const xp = computeXP();
+  const li = levelInfo(xp);
+  document.getElementById("level-name").textContent = li.name;
+  document.getElementById("level-xp").textContent = xp.toLocaleString() + " XP";
+  document.getElementById("level-fill").style.width = Math.round(li.frac * 100) + "%";
+  document.getElementById("level-next").textContent = li.next
+    ? `${(li.next.xp - xp).toLocaleString()} XP to ${li.next.name}`
+    : "Max level — Legend status. 🏆";
+
+  // Badges (earned / locked)
+  document.getElementById("badge-grid").innerHTML = BADGES.map((b) => {
+    const earned = !!state.gamify.badges[b.id];
+    return `<div class="badge-item ${earned ? "earned" : "locked"}">
+      <span class="badge-icon">${b.icon}</span>
+      <span class="badge-name">${escapeHtml(b.name)}</span>
+      <span class="badge-desc">${escapeHtml(b.desc)}</span>
+    </div>`;
+  }).join("");
+
   // Past-stats inputs (only show a value if it's non-zero, so placeholder shows otherwise)
   document.getElementById("b-contacts").value = state.baseline.contacts || "";
   document.getElementById("b-stopbacks").value = state.baseline.stopbacks || "";
@@ -944,6 +1136,7 @@ function addLead(e) {
 
   markActiveToday();
   render();
+  runGamification();
   e.target.reset();
   clearInterestChips();
   document.getElementById("f-name").focus();
@@ -975,6 +1168,7 @@ function toggleStatus(id, status) {
   lead.status = lead.status === status ? "stopback" : status;
   markActiveToday();
   render();
+  runGamification({ sale: lead.status === "sale" });
 }
 
 function deleteLead(id) {
@@ -987,6 +1181,7 @@ function bumpTally(amount) {
   state.contactsTally = Math.max(0, state.contactsTally + amount);
   if (amount > 0) markActiveToday();
   render();
+  if (amount > 0) runGamification();
 }
 
 // ---- Edit a lead (modal) --------------------------------------------
@@ -1226,6 +1421,7 @@ function switchView(view) {
 // =====================================================================
 function init() {
   load();
+  initGamify(); // sync earned badges silently — no celebration on page load
 
   document.getElementById("today-label").textContent = new Date().toLocaleDateString("en-US", {
     weekday: "short",

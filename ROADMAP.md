@@ -13,7 +13,7 @@ A door-to-door sales tracker. ~1 hour/day, ~2 weeks. Check things off as you go.
 5. ~~**Daily goal progress ring** on the Feed~~ ✅ DONE
 6. **Lead score / smarter Hit List** — auto-rank stop backs by demeanor + recency + due callback
 7. **Follow-up cadence** — "last contacted" timestamp + auto nudges (Day 1 / 3 / 7)
-8. **Badges & milestones** — first sale, 10-day streak, 100 contacts (multiple ways to win)
+8. ~~**Badges & milestones**~~ ✅ DONE (XP + levels, badges, confetti, streak-at-risk card)
 9. ~~**CSV/Excel export** of leads~~ ✅ DONE (Profile → Backup → Export leads to CSV)
 10. **Leaderboard done right** (cloud) — tiered groups + personal-best framing, not one global rank
 
