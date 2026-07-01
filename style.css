@@ -346,7 +346,85 @@ button.ghost:hover { border-color: var(--green); color: var(--green-deep); }
 .lead-actions .mark-missed.on { background: var(--red); color: var(--paper); border-color: var(--red); }
 .lead-actions .del:hover { border-color: var(--red); color: var(--red); }
 
+/* ===== Stats: time filter (segmented control) ===== */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.25rem;
+  margin-bottom: 1rem;
+}
+.seg-btn {
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  padding: 0.55rem 0.4rem;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.seg-btn.active { background: var(--green); color: #fff; }
+
 /* ===== Stats: highlights ===== */
+.highlight.tappable { cursor: pointer; }
+.highlight.tappable:active { transform: scale(0.98); }
+
+/* Funnel rows are buttons now */
+button.fbar {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 0.9rem;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+button.fbar:last-child { margin-bottom: 0; }
+button.fbar:hover .fbar-top { color: var(--green-deep); }
+.fbar .chev { color: var(--ink-soft); font-weight: 800; }
+
+/* ===== Stats detail: 7-day trend bars ===== */
+.detail-num { font-family: var(--font-display); font-size: 2.6rem; font-weight: 900; line-height: 1; }
+.detail-insight { color: var(--ink-soft); margin: 0.35rem 0 0; }
+.trend {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.trend-col { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+.trend-track { height: 84px; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.trend-bar {
+  width: 100%;
+  max-width: 26px;
+  background: var(--green);
+  border-radius: 6px 6px 0 0;
+  min-height: 3px;
+  transition: height 0.4s ease;
+}
+.trend-bar.missed { background: var(--red); }
+.trend-count { font-size: 0.75rem; font-weight: 700; color: var(--ink); }
+.trend-day { font-size: 0.7rem; color: var(--ink-soft); }
+
+/* compact lead rows in the detail list */
+.mini-lead {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  padding: 0.6rem 0; border-bottom: 1px solid var(--line);
+}
+.mini-lead:last-child { border-bottom: none; }
+.mini-lead .ml-name { font-weight: 700; }
+.mini-lead .ml-sub { font-size: 0.8rem; color: var(--ink-soft); }
+.mini-lead .ml-date { font-size: 0.78rem; color: var(--ink-soft); white-space: nowrap; }
+
+/* ===== Stats: highlights (cards) ===== */
 .highlight-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
 .highlight {
   background: var(--paper-2); border: 1px solid var(--line);

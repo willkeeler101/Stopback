@@ -578,35 +578,189 @@ function renderLeads() {
 }
 
 // =====================================================================
-//  STATS
+//  STATS  (with time filter + drill-down detail views)
 // =====================================================================
+let statsRange = "all";            // "today" | "week" | "all"
+let currentStatsCategory = null;   // which category detail is open
+
+// Category definitions: label + which leads belong to it.
+const CAT = {
+  contacts:  { label: "Contacts",        match: () => true },
+  stopbacks: { label: "Stop Backs",      match: () => true },
+  missed:    { label: "Missed Closings", match: (l) => l.status === "missed" },
+  sales:     { label: "Sales",           match: (l) => l.status === "sale" },
+};
+
+// Start-of-day timestamp for "N days ago" (0 = today).
+function dayStart(daysAgo = 0) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - daysAgo);
+  return d.getTime();
+}
+
+// Leads whose createdAt falls inside the selected range.
+function leadsInRange(range) {
+  if (range === "all") return state.leads;
+  const from = range === "today" ? dayStart(0) : dayStart(6); // week = last 7 days incl today
+  return state.leads.filter((l) => new Date(l.createdAt).getTime() >= from);
+}
+
+// Leads belonging to a category within a range.
+function categoryLeads(cat, range) {
+  return leadsInRange(range).filter(CAT[cat].match);
+}
+
+// Category counts for a range. "All time" folds in imported baseline + tally.
+function rangeCounts(range) {
+  const leads = leadsInRange(range);
+  const missed = leads.filter(CAT.missed.match).length;
+  const sales = leads.filter(CAT.sales.match).length;
+  const stopbacks = leads.length;
+  let contacts = leads.length;
+  let sb = stopbacks, ms = missed, sl = sales;
+  if (range === "all") {
+    contacts += state.contactsTally + base("contacts");
+    sb += base("stopbacks");
+    ms += base("missed");
+    sl += base("sales");
+  }
+  return { contacts, stopbacks: sb, missed: ms, sales: sl };
+}
+
 function renderStats() {
-  const contacts = contactsTotal();
-  const stopbacks = stopbacksTotal();
-  const missed = missedTotal();
-  const sales = salesTotal();
+  const c = rangeCounts(statsRange);
 
   // Highlights
-  document.getElementById("h-sales").textContent = sales;
-  document.getElementById("h-closerate").textContent = pct(sales, sales + missed);
-  document.getElementById("h-stopbacks").textContent = stopbacks;
+  document.getElementById("h-sales").textContent = c.sales;
+  document.getElementById("h-closerate").textContent = pct(c.sales, c.sales + c.missed);
+  document.getElementById("h-stopbacks").textContent = c.stopbacks;
 
   // Funnel bars (widths relative to the top of the funnel = contacts)
-  const top = Math.max(contacts, 1);
-  setBar("f-contacts", contacts, top);
-  setBar("f-stopbacks", stopbacks, top);
-  setBar("f-missed", missed, top);
-  setBar("f-sales", sales, top);
+  const top = Math.max(c.contacts, 1);
+  setBar("f-contacts", c.contacts, top);
+  setBar("f-stopbacks", c.stopbacks, top);
+  setBar("f-missed", c.missed, top);
+  setBar("f-sales", c.sales, top);
 
   // Conversion rates
-  document.getElementById("r-stopback").textContent = pct(stopbacks, contacts);
-  document.getElementById("r-close").textContent = pct(sales, sales + missed);
-  document.getElementById("r-overall").textContent = pct(sales, contacts);
+  document.getElementById("r-stopback").textContent = pct(c.stopbacks, c.contacts);
+  document.getElementById("r-close").textContent = pct(c.sales, c.sales + c.missed);
+  document.getElementById("r-overall").textContent = pct(c.sales, c.contacts);
+
+  // Keep an open detail view in sync.
+  if (currentStatsCategory && !document.getElementById("view-stats-detail").hidden) {
+    renderStatsDetail();
+  }
 }
 
 function setBar(id, value, max) {
   document.getElementById(id).style.width = Math.round((value / max) * 100) + "%";
   document.getElementById(id + "-n").textContent = value;
+}
+
+function setStatsRange(range) {
+  statsRange = range;
+  document.querySelectorAll("#stats-range .seg-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.range === range)
+  );
+  renderStats();
+}
+
+// Count a category's leads created between two timestamps.
+function countCatBetween(cat, from, to) {
+  return state.leads.filter((l) => {
+    const t = new Date(l.createdAt).getTime();
+    return t >= from && t < to && CAT[cat].match(l);
+  }).length;
+}
+
+// Plain-English "vs last week" line for a category.
+function categoryInsight(cat) {
+  const label = CAT[cat].label;
+  const now = Date.now();
+  const week = 7 * 86400000;
+  const thisWeek = countCatBetween(cat, now - week, now + 1);
+  const lastWeek = countCatBetween(cat, now - 2 * week, now - week);
+
+  if (thisWeek === 0 && lastWeek === 0) return `No ${label.toLowerCase()} logged in the last two weeks yet.`;
+  if (lastWeek === 0) return `${thisWeek} ${label.toLowerCase()} this week — up from 0 last week. 🚀`;
+  const change = Math.round(((thisWeek - lastWeek) / lastWeek) * 100);
+  if (change > 0) return `${label} up ${change}% vs last week (${thisWeek} vs ${lastWeek}).`;
+  if (change < 0) return `${label} down ${Math.abs(change)}% vs last week (${thisWeek} vs ${lastWeek}).`;
+  return `${label} flat vs last week (${thisWeek} both weeks).`;
+}
+
+// 7-day trend bars (last 7 days, oldest → newest).
+function trendHtml(cat) {
+  const dayLabels = ["S", "M", "T", "W", "T", "F", "S"];
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const from = dayStart(i);
+    const to = dayStart(i - 1); // next midnight
+    const d = new Date(from);
+    days.push({ count: countCatBetween(cat, from, to), label: dayLabels[d.getDay()] });
+  }
+  const max = Math.max(1, ...days.map((d) => d.count));
+  const barClass = cat === "missed" ? "trend-bar missed" : "trend-bar";
+  const cols = days
+    .map((d) => `
+      <div class="trend-col">
+        <span class="trend-count">${d.count || ""}</span>
+        <div class="trend-track"><div class="${barClass}" style="height:${(d.count / max) * 100}%"></div></div>
+        <span class="trend-day">${d.label}</span>
+      </div>`)
+    .join("");
+  return `<div class="trend">${cols}</div>`;
+}
+
+function openStatsDetail(cat) {
+  currentStatsCategory = cat;
+  switchView("stats-detail");
+  renderStatsDetail();
+}
+
+function renderStatsDetail() {
+  const cat = currentStatsCategory;
+  if (!cat) return;
+  const label = CAT[cat].label;
+  const count = rangeCounts(statsRange)[cat];
+  const leads = categoryLeads(cat, statsRange).slice().reverse(); // newest first
+  const rangeLabel = statsRange === "today" ? "today" : statsRange === "week" ? "this week" : "all time";
+
+  // Note when the shown number includes undated imported/tally data not in the list.
+  const extra = count - leads.length;
+  const extraNote = extra > 0
+    ? `<p class="muted small">+${extra} earlier/imported not shown individually.</p>`
+    : "";
+
+  const list = leads.length
+    ? leads.map((l) => `
+        <div class="mini-lead">
+          <div>
+            <div class="ml-name">${escapeHtml(l.name)}</div>
+            <div class="ml-sub">${escapeHtml(l.phone)}${l.interest ? " · " + escapeHtml(l.interest) : ""}</div>
+          </div>
+          <span class="ml-date">${formatDateShort(localDateStr(new Date(l.createdAt)))}</span>
+        </div>`).join("")
+    : `<p class="empty-hint">No ${label.toLowerCase()} in this range yet.</p>`;
+
+  document.getElementById("stats-detail-body").innerHTML = `
+    <h1 class="view-title">${label}</h1>
+    <p class="view-sub">Showing ${rangeLabel}</p>
+    <div class="card">
+      <span class="detail-num">${count}</span>
+      <p class="detail-insight">${categoryInsight(cat)}</p>
+    </div>
+    <div class="card">
+      <h2 class="card-title">Last 7 days</h2>
+      ${trendHtml(cat)}
+    </div>
+    <div class="card">
+      <h2 class="card-title">Leads</h2>
+      ${extraNote}
+      ${list}
+    </div>`;
 }
 
 // =====================================================================
@@ -1000,6 +1154,15 @@ function init() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchView(btn.dataset.view));
   });
+
+  // Stats: time filter, drill-down taps, and back button
+  document.querySelectorAll("#stats-range .seg-btn").forEach((b) =>
+    b.addEventListener("click", () => setStatsRange(b.dataset.range))
+  );
+  document.querySelectorAll("[data-cat]").forEach((elm) =>
+    elm.addEventListener("click", () => openStatsDetail(elm.dataset.cat))
+  );
+  document.getElementById("stats-detail-back").addEventListener("click", () => switchView("stats"));
 
   // Edit-lead modal
   document.getElementById("edit-form").addEventListener("submit", submitEdit);

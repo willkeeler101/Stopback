@@ -114,9 +114,16 @@
       <h1 class="view-title">Stats</h1>
       <p class="view-sub">Your numbers, working for you.</p>
 
-      <!-- Highlight cards -->
+      <!-- Time filter -->
+      <div class="seg" id="stats-range" role="group" aria-label="Time range">
+        <button type="button" class="seg-btn" data-range="today">Today</button>
+        <button type="button" class="seg-btn" data-range="week">This week</button>
+        <button type="button" class="seg-btn active" data-range="all">All time</button>
+      </div>
+
+      <!-- Highlight cards (Sales & Stop backs drill in) -->
       <div class="highlight-grid">
-        <div class="highlight green-bg">
+        <div class="highlight green-bg tappable" data-cat="sales">
           <span class="highlight-num" id="h-sales">0</span>
           <span class="highlight-label">Sales</span>
         </div>
@@ -124,31 +131,31 @@
           <span class="highlight-num" id="h-closerate">0%</span>
           <span class="highlight-label">Close rate</span>
         </div>
-        <div class="highlight green-line">
+        <div class="highlight green-line tappable" data-cat="stopbacks">
           <span class="highlight-num" id="h-stopbacks">0</span>
           <span class="highlight-label">Stop backs</span>
         </div>
       </div>
 
-      <!-- Funnel bars -->
+      <!-- Funnel bars — each row drills into a detail view -->
       <div class="card">
         <h2 class="card-title">Your Funnel</h2>
-        <div class="fbar">
-          <div class="fbar-top"><span>Contacts</span><span id="f-contacts-n">0</span></div>
+        <button type="button" class="fbar" data-cat="contacts">
+          <div class="fbar-top"><span>Contacts <span class="chev">›</span></span><span id="f-contacts-n">0</span></div>
           <div class="fbar-track"><div class="fbar-fill ink" id="f-contacts"></div></div>
-        </div>
-        <div class="fbar">
-          <div class="fbar-top"><span>Stop Backs</span><span id="f-stopbacks-n">0</span></div>
+        </button>
+        <button type="button" class="fbar" data-cat="stopbacks">
+          <div class="fbar-top"><span>Stop Backs <span class="chev">›</span></span><span id="f-stopbacks-n">0</span></div>
           <div class="fbar-track"><div class="fbar-fill green" id="f-stopbacks"></div></div>
-        </div>
-        <div class="fbar">
-          <div class="fbar-top"><span>Missed Closings</span><span id="f-missed-n">0</span></div>
+        </button>
+        <button type="button" class="fbar" data-cat="missed">
+          <div class="fbar-top"><span>Missed Closings <span class="chev">›</span></span><span id="f-missed-n">0</span></div>
           <div class="fbar-track"><div class="fbar-fill red" id="f-missed"></div></div>
-        </div>
-        <div class="fbar">
-          <div class="fbar-top"><span>Sales</span><span id="f-sales-n">0</span></div>
+        </button>
+        <button type="button" class="fbar" data-cat="sales">
+          <div class="fbar-top"><span>Sales <span class="chev">›</span></span><span id="f-sales-n">0</span></div>
           <div class="fbar-track"><div class="fbar-fill green-deep" id="f-sales"></div></div>
-        </div>
+        </button>
       </div>
 
       <!-- Conversion rates -->
@@ -160,6 +167,12 @@
           <div class="rate"><span class="rate-num" id="r-overall">0%</span><span class="rate-label">Sales / contact</span></div>
         </div>
       </div>
+    </section>
+
+    <!-- ===================== STATS DETAIL (drill-down) ===================== -->
+    <section class="view" id="view-stats-detail" hidden>
+      <button class="back-link" id="stats-detail-back" type="button">← Stats</button>
+      <div id="stats-detail-body"><!-- built by app.js --></div>
     </section>
 
     <!-- ===================== PROFILE VIEW ===================== -->
