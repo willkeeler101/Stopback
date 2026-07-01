@@ -41,6 +41,7 @@ const Auth = (function () {
       const { data: { session } } = await sb.auth.getSession();
       if (!session) {
         appStarted = false;
+        if (window.dbResetUser) dbResetUser();
         show("auth");
         return;
       }

@@ -7,6 +7,7 @@ try {
   const cfg = window.STOPBACK_CONFIG;
   if (window.supabase && cfg && cfg.url && cfg.url.startsWith("https://") && cfg.anonKey) {
     sb = window.supabase.createClient(cfg.url, cfg.anonKey);
+    console.log("[StopBack] Supabase client ready:", cfg.url);
   } else {
     console.error(
       "StopBack: Supabase not configured. Copy config.example.js to config.js and add your Project URL + anon key."

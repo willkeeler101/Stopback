@@ -41,9 +41,25 @@ function load() {
   }
 }
 
+// Phase 2: Supabase is the source of truth. save() now only writes a local
+// CACHE (under a different key) so we never clobber the pre-migration data in
+// STORAGE_KEY, which the one-time importer still needs. Likes are cached too.
 function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem("stopback-cache-v1", JSON.stringify(state));
+    localStorage.setItem("stopback-likes", JSON.stringify(state.likes || {}));
+  } catch (_) {}
 }
+
+// Debounce helper for chatty inputs (name/goal/baseline typing).
+function debounce(fn, ms = 500) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+const saveProfileDebounced = debounce(
+  (patch) => dbSaveProfile(patch).catch(dbFail("Couldn't save profile")),
+  500
+);
 
 // ---- Date helpers ----------------------------------------------------
 function localDateStr(d = new Date()) {
@@ -56,7 +72,11 @@ function localDateStr(d = new Date()) {
 // Record that the user did something today (drives the streak).
 function markActiveToday() {
   const today = localDateStr();
-  if (!state.activeDays.includes(today)) state.activeDays.push(today);
+  if (!state.activeDays.includes(today)) {
+    state.activeDays.push(today);
+    if (window.dbSaveProfile)
+      dbSaveProfile({ active_days: state.activeDays }).catch(dbFail("Couldn't save streak"));
+  }
 }
 
 function currentStreak() {
@@ -169,6 +189,8 @@ function initGamify() {
   const goal = state.profile.dailyGoal || 0;
   if (goal > 0 && stopbacksToday() >= goal) state.gamify.goalHitDate = today;
   save();
+  if (window.dbSaveProfile)
+    dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
 }
 
 // Called AFTER a user action. Detects new milestones and celebrates once each.
@@ -200,6 +222,8 @@ function runGamification(opts = {}) {
   });
 
   save();
+  if (window.dbSaveProfile)
+    dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
   if (party || newBadges.length) confettiBurst();
   newBadges.forEach((b, i) => setTimeout(() => toast(`Badge earned: ${b.name} ${b.icon}`), 700 + i * 900));
 }
@@ -1126,8 +1150,8 @@ function addLead(e) {
   const phone = document.getElementById("f-phone").value.trim();
   if (!name || !phone) return;
 
-  state.leads.push({
-    id: Date.now(),
+  const lead = {
+    id: crypto.randomUUID(),
     name,
     phone,
     address: document.getElementById("f-address").value.trim(),
@@ -1137,11 +1161,13 @@ function addLead(e) {
     callback: document.getElementById("f-callback").value || "",
     status: "stopback",
     createdAt: new Date().toISOString(),
-  });
+  };
+  state.leads.push(lead);
 
   markActiveToday();
   render();
   runGamification();
+  dbAddLead(lead).catch(dbFail("Couldn't save lead"));
   e.target.reset();
   clearInterestChips();
   document.getElementById("f-name").focus();
@@ -1174,19 +1200,28 @@ function toggleStatus(id, status) {
   markActiveToday();
   render();
   runGamification({ sale: lead.status === "sale" });
+  dbUpdateLead(id, { status: lead.status }).catch(dbFail("Couldn't update lead"));
 }
 
 function deleteLead(id) {
   if (!confirm("Delete this lead?")) return;
   state.leads = state.leads.filter((l) => l.id !== id);
   render();
+  dbDeleteLead(id).catch(dbFail("Couldn't delete lead"));
 }
 
 function bumpTally(amount) {
-  state.contactsTally = Math.max(0, state.contactsTally + amount);
+  const next = Math.max(0, state.contactsTally + amount);
+  const changed = next !== state.contactsTally;
+  state.contactsTally = next;
   if (amount > 0) markActiveToday();
   render();
-  if (amount > 0) runGamification();
+  if (amount > 0) {
+    runGamification();
+    if (changed) dbLogContact().catch(dbFail("Couldn't log contact"));
+  } else if (amount < 0 && changed) {
+    dbUnlogContact().catch(dbFail("Couldn't update contacts"));
+  }
 }
 
 // ---- Edit a lead (modal) --------------------------------------------
@@ -1209,7 +1244,7 @@ function closeEdit() {
 
 function submitEdit(e) {
   e.preventDefault();
-  const id = parseInt(document.getElementById("e-id").value, 10);
+  const id = document.getElementById("e-id").value; // uuid string
   const l = state.leads.find((x) => x.id === id);
   if (!l) return;
   l.name = document.getElementById("e-name").value.trim();
@@ -1220,6 +1255,10 @@ function submitEdit(e) {
   l.callback = document.getElementById("e-callback").value || "";
   closeEdit();
   render();
+  dbUpdateLead(id, {
+    name: l.name, phone: l.phone, address: l.address,
+    demeanor: l.demeanor, notes: l.notes, callback: l.callback,
+  }).catch(dbFail("Couldn't save changes"));
 }
 
 // ---- Products --------------------------------------------------------
@@ -1268,16 +1307,13 @@ function submitProduct(e) {
       p.name = name;
       p.price = price;
       p.features = features;
+      dbUpdateProduct(p.id, { name, price, features }).catch(dbFail("Couldn't save product"));
     }
     cancelEditProduct();
   } else {
-    state.products.push({
-      id: Date.now(),
-      name,
-      price,
-      features,
-      createdAt: new Date().toISOString(),
-    });
+    const prod = { id: crypto.randomUUID(), name, price, features, createdAt: new Date().toISOString() };
+    state.products.push(prod);
+    dbAddProduct(prod).catch(dbFail("Couldn't save product"));
     e.target.reset();
   }
   save();
@@ -1311,6 +1347,7 @@ function deleteProduct(id) {
   if (editingProductId === id) cancelEditProduct();
   save();
   renderProducts();
+  dbDeleteProduct(id).catch(dbFail("Couldn't delete product"));
 }
 
 // ---- Friends ---------------------------------------------------------
@@ -1428,8 +1465,14 @@ function switchView(view) {
 // Loads data and paints the app. Called by the auth layer once a rep is
 // signed in (Phase 2). For now it still reads from localStorage; the Supabase
 // data layer swaps in behind this same entry point in the next commit.
-function startApp() {
-  load();
+async function startApp() {
+  try {
+    state = await dbLoadState(); // pull this rep's data from Supabase
+  } catch (err) {
+    console.error("[StopBack] Failed to load your data:", err);
+    if (typeof toast === "function") toast("⚠ Couldn't load your data");
+    state = structuredClone(DEFAULT_STATE);
+  }
   initGamify(); // sync earned badges silently — no celebration on page load
   render();
 }
@@ -1451,15 +1494,17 @@ function wireEvents() {
   document.getElementById("tally-minus").addEventListener("click", () => bumpTally(-1));
   document.getElementById("search").addEventListener("input", renderLeads);
 
-  // Profile fields save as you type.
+  // Profile fields save as you type (debounced write to Supabase).
   document.getElementById("p-name").addEventListener("input", (e) => {
     state.profile.name = e.target.value;
     save();
     renderFeed();
+    saveProfileDebounced({ display_name: e.target.value });
   });
   document.getElementById("p-goal").addEventListener("input", (e) => {
     state.profile.dailyGoal = parseInt(e.target.value, 10) || 0;
     save();
+    saveProfileDebounced({ daily_goal: state.profile.dailyGoal });
   });
 
   // Import-past-stats inputs. We update totals everywhere but DON'T re-render
@@ -1474,6 +1519,7 @@ function wireEvents() {
       document.getElementById("p-contacts").textContent = contactsTotal();
       document.getElementById("p-stopbacks").textContent = stopbacksTotal();
       document.getElementById("p-sales").textContent = salesTotal();
+      saveProfileDebounced({ ["baseline_" + key]: state.baseline[key] });
     });
   });
 

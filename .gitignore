@@ -5,3 +5,6 @@ Thumbs.db
 
 # Local Supabase keys (copy config.example.js -> config.js)
 config.js
+
+# Local dev server helper
+serve.ps1
