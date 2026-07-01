@@ -829,7 +829,7 @@ function renderLeads() {
       .includes(query);
   });
 
-  emptyEl.style.display = state.leads.length ? "none" : "block";
+  emptyEl.hidden = state.leads.length > 0;
   listEl.innerHTML = "";
 
   leads.forEach((l) => {
@@ -926,6 +926,11 @@ function rangeCounts(range) {
 }
 
 function renderStats() {
+  // Empty state when there's no data at all (no leads, tally, or imported stats).
+  const hasData = contactsTotal() > 0 || missedTotal() > 0 || salesTotal() > 0;
+  document.getElementById("stats-empty").hidden = hasData;
+  document.getElementById("stats-content").hidden = !hasData;
+
   const c = rangeCounts(statsRange);
 
   // Highlights
@@ -1474,6 +1479,11 @@ function init() {
 
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchView(btn.dataset.view));
+  });
+
+  // Empty-state call-to-action buttons jump to the relevant tab.
+  document.querySelectorAll("[data-goto]").forEach((btn) => {
+    btn.addEventListener("click", () => switchView(btn.dataset.goto));
   });
 
   // Stats: time filter, drill-down taps, and back button

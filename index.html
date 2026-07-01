@@ -32,8 +32,13 @@
           <span class="streak-flame">🔥</span><strong id="streak-num">0</strong>
         </div>
       </div>
-      <!-- The whole scrollable feed is built here by app.js -->
-      <div class="feed-stream" id="feed-stream"></div>
+      <!-- The whole scrollable feed is built here by app.js.
+           Skeletons show briefly on load instead of a blank flash. -->
+      <div class="feed-stream" id="feed-stream">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
     </section>
 
     <!-- ===================== LEADS VIEW ===================== -->
@@ -42,7 +47,12 @@
       <p class="view-sub">Everyone whose number you got.</p>
       <input type="search" id="search" class="search" placeholder="Search name, address, notes…" />
       <ul class="leads" id="leads-list"></ul>
-      <p class="empty-hint" id="leads-empty">No stop backs yet. Go knock some doors. 🚪</p>
+      <div class="empty-state" id="leads-empty">
+        <span class="empty-emoji">🚪</span>
+        <p class="empty-title">No stop backs yet</p>
+        <p class="empty-copy">Every deal starts with a name and a number. Log your first stop back and it'll show up here.</p>
+        <button class="primary" type="button" data-goto="log">Log a stop back</button>
+      </div>
     </section>
 
     <!-- ===================== LOG VIEW ===================== -->
@@ -114,6 +124,15 @@
       <h1 class="view-title">Stats</h1>
       <p class="view-sub">Your numbers, working for you.</p>
 
+      <!-- Empty state when there's no data at all -->
+      <div class="empty-state" id="stats-empty" hidden>
+        <span class="empty-emoji">📊</span>
+        <p class="empty-title">No numbers yet</p>
+        <p class="empty-copy">Log a few doors and stop backs, and your funnel and conversion rates will build here.</p>
+        <button class="primary" type="button" data-goto="log">Start logging</button>
+      </div>
+
+      <div id="stats-content">
       <!-- Time filter -->
       <div class="seg" id="stats-range" role="group" aria-label="Time range">
         <button type="button" class="seg-btn" data-range="today">Today</button>
@@ -167,6 +186,7 @@
           <div class="rate"><span class="rate-num" id="r-overall">0%</span><span class="rate-label">Sales / contact</span></div>
         </div>
       </div>
+      </div><!-- /stats-content -->
     </section>
 
     <!-- ===================== STATS DETAIL (drill-down) ===================== -->
