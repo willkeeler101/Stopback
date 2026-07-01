@@ -37,27 +37,33 @@ const Auth = (function () {
   }
 
   async function route() {
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session) {
-      appStarted = false;
-      show("auth");
-      return;
-    }
-    const profile = await currentProfile();
-    if (!profile || !profile.display_name) {
-      // Pre-fill onboarding with any defaults we already have.
-      if (profile && profile.username && !profile.username.startsWith("rep_")) {
-        document.getElementById("ob-username").value = profile.username;
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) {
+        appStarted = false;
+        show("auth");
+        return;
       }
-      show("onboarding");
-      return;
-    }
-    // Signed in + onboarded → show the app and boot it once.
-    document.getElementById("account-email").textContent = session.user.email;
-    show("app");
-    if (!appStarted) {
-      appStarted = true;
-      if (onReady) onReady(profile);
+      const profile = await currentProfile();
+      if (!profile || !profile.display_name) {
+        // Pre-fill onboarding with any defaults we already have.
+        if (profile && profile.username && !profile.username.startsWith("rep_")) {
+          document.getElementById("ob-username").value = profile.username;
+        }
+        show("onboarding");
+        return;
+      }
+      // Signed in + onboarded → show the app and boot it once.
+      document.getElementById("account-email").textContent = session.user.email;
+      show("app");
+      if (!appStarted) {
+        appStarted = true;
+        if (onReady) onReady(profile);
+      }
+    } catch (err) {
+      console.error("StopBack route error:", err);
+      show("auth");
+      authError(err.message || "Couldn't load your profile — is the schema.sql run in Supabase?");
     }
   }
 
@@ -164,7 +170,10 @@ const Auth = (function () {
     }
 
     await route();
-    sb.auth.onAuthStateChange(() => route());
+    // IMPORTANT: defer out of the callback. Calling Supabase (getSession,
+    // .from()...) directly inside onAuthStateChange can deadlock because the
+    // auth client holds a lock during the callback.
+    sb.auth.onAuthStateChange(() => { setTimeout(route, 0); });
   }
 
   return { begin };
