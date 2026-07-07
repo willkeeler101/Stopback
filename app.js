@@ -1145,7 +1145,6 @@ function render() {
   renderStats();
   renderProfile();
   renderProducts();
-  renderFriends();
   save();
 }
 
@@ -1358,41 +1357,123 @@ function deleteProduct(id) {
   dbDeleteProduct(id).catch(dbFail("Couldn't delete product"));
 }
 
-// ---- Friends ---------------------------------------------------------
-function renderFriends() {
-  const list = document.getElementById("friends-list");
-  const empty = document.getElementById("friends-empty");
-  empty.style.display = state.friends.length ? "none" : "block";
-  list.innerHTML = "";
+// ---- Friends (real friend requests via Supabase) ---------------------
+let friendships = []; // cache of get_friendships() while the view is open
 
-  state.friends.forEach((f) => {
+// Accepted friends' user ids — used by the feed/leaderboard later.
+function acceptedFriendIds() {
+  return friendships.filter((f) => f.status === "accepted").map((f) => f.other_id);
+}
+
+async function loadFriends() {
+  try {
+    friendships = await dbGetFriendships();
+  } catch (err) {
+    console.error("[StopBack] Couldn't load friends:", err);
+    friendships = [];
+  }
+  renderFriendsLists();
+}
+
+function renderFriendsLists() {
+  const incoming = friendships.filter((f) => f.status === "pending" && f.direction === "incoming");
+  const outgoing = friendships.filter((f) => f.status === "pending" && f.direction === "outgoing");
+  const accepted = friendships.filter((f) => f.status === "accepted");
+
+  // Requests card (incoming to accept/decline, outgoing to cancel)
+  const reqCard = document.getElementById("requests-card");
+  const reqList = document.getElementById("requests-list");
+  reqCard.hidden = incoming.length === 0 && outgoing.length === 0;
+  reqList.innerHTML = "";
+
+  incoming.forEach((f) => {
     const li = el(`
       <li class="friend-item">
-        <span class="avatar" style="background:var(--green-deep)">${initials(f.name)}</span>
-        <span class="friend-name">${escapeHtml(f.name)}</span>
+        <span class="avatar" style="background:var(--green-deep)">${initials(f.display_name || f.username)}</span>
+        <span class="friend-name">${escapeHtml(f.display_name || f.username)}<br><span class="muted small">@${escapeHtml(f.username)} · wants to connect</span></span>
+        <span class="fr-actions">
+          <button class="fr-accept" type="button">Accept</button>
+          <button class="frdel" type="button">Decline</button>
+        </span>
+      </li>`);
+    li.querySelector(".fr-accept").onclick = () => acceptFriend(f.friendship_id);
+    li.querySelector(".frdel").onclick = () => removeFriend(f.friendship_id);
+    reqList.appendChild(li);
+  });
+
+  outgoing.forEach((f) => {
+    const li = el(`
+      <li class="friend-item">
+        <span class="avatar" style="background:var(--ink-soft)">${initials(f.display_name || f.username)}</span>
+        <span class="friend-name">${escapeHtml(f.display_name || f.username)}<br><span class="muted small">@${escapeHtml(f.username)} · request sent</span></span>
+        <button class="frdel" type="button">Cancel</button>
+      </li>`);
+    li.querySelector(".frdel").onclick = () => removeFriend(f.friendship_id);
+    reqList.appendChild(li);
+  });
+
+  // Accepted friends
+  const list = document.getElementById("friends-list");
+  document.getElementById("friends-empty").hidden = accepted.length > 0;
+  list.innerHTML = "";
+  accepted.forEach((f) => {
+    const li = el(`
+      <li class="friend-item">
+        <span class="avatar" style="background:var(--green-deep)">${initials(f.display_name || f.username)}</span>
+        <span class="friend-name">${escapeHtml(f.display_name || f.username)}<br><span class="muted small">@${escapeHtml(f.username)}</span></span>
         <button class="frdel" type="button">Remove</button>
       </li>`);
-    li.querySelector(".frdel").onclick = () => deleteFriend(f.id);
+    li.querySelector(".frdel").onclick = () => removeFriend(f.friendship_id);
     list.appendChild(li);
   });
 }
 
-function addFriend(e) {
-  e.preventDefault();
-  const name = document.getElementById("fr-name").value.trim();
-  if (!name) return;
-  state.friends.push({ id: "f" + Date.now(), name });
-  e.target.reset();
-  save();
-  renderFriends();
-  renderFeed();
+async function searchFriends(q) {
+  const resultsEl = document.getElementById("search-results");
+  if (!q.trim()) { resultsEl.innerHTML = ""; return; }
+  let results = [];
+  try {
+    results = await dbSearchProfiles(q.trim());
+  } catch (err) {
+    console.error("[StopBack] Search failed:", err);
+  }
+  const known = new Set(friendships.map((f) => f.other_id));
+  resultsEl.innerHTML = "";
+  if (!results.length) {
+    resultsEl.innerHTML = `<p class="muted small">No one found for "${escapeHtml(q)}".</p>`;
+    return;
+  }
+  results.forEach((r) => {
+    const already = known.has(r.id);
+    const li = el(`
+      <div class="friend-item">
+        <span class="avatar" style="background:var(--green-deep)">${initials(r.display_name || r.username)}</span>
+        <span class="friend-name">${escapeHtml(r.display_name || r.username)}<br><span class="muted small">@${escapeHtml(r.username)}</span></span>
+        <button class="fr-accept" type="button" ${already ? "disabled" : ""}>${already ? "Pending/Friend" : "Add"}</button>
+      </div>`);
+    if (!already) li.querySelector(".fr-accept").onclick = () => sendFriendRequest(r.id);
+    resultsEl.appendChild(li);
+  });
 }
 
-function deleteFriend(id) {
-  state.friends = state.friends.filter((f) => f.id !== id);
-  save();
-  renderFriends();
-  renderFeed();
+async function sendFriendRequest(otherId) {
+  try {
+    await dbSendRequest(otherId);
+    toast("Request sent 👍");
+    document.getElementById("friend-search").value = "";
+    document.getElementById("search-results").innerHTML = "";
+    await loadFriends();
+  } catch (err) {
+    dbFail("Couldn't send request")(err);
+  }
+}
+async function acceptFriend(id) {
+  try { await dbAcceptFriendship(id); toast("Friend added 🎉"); await loadFriends(); }
+  catch (err) { dbFail("Couldn't accept")(err); }
+}
+async function removeFriend(id) {
+  try { await dbDeleteFriendship(id); await loadFriends(); }
+  catch (err) { dbFail("Couldn't update")(err); }
 }
 
 // ---- Backup ----------------------------------------------------------
@@ -1589,10 +1670,17 @@ function wireEvents() {
     dbSaveProfile({ share_phone: e.target.checked }).catch(dbFail("Couldn't save setting"));
   });
 
-  // Friends
-  document.getElementById("open-friends").addEventListener("click", () => switchView("friends"));
+  // Friends (real requests)
+  document.getElementById("open-friends").addEventListener("click", () => {
+    switchView("friends");
+    loadFriends();
+  });
   document.getElementById("friends-back").addEventListener("click", () => switchView("profile"));
-  document.getElementById("friend-form").addEventListener("submit", addFriend);
+  document.getElementById("friend-search-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    searchFriends(document.getElementById("friend-search").value);
+  });
+  document.getElementById("friend-search").addEventListener("input", debounce((e) => searchFriends(e.target.value), 350));
 }
 
 // Boot: wire listeners once, then hand off to the auth layer, which routes to

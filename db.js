@@ -136,3 +136,30 @@ async function dbSaveProfile(patch) {
   const { error } = await sb.from("profiles").update(patch).eq("id", uid);
   if (error) throw error;
 }
+
+// ---- friends (Phase 3) -------------------------------------------------
+async function dbSearchProfiles(q) {
+  const { data, error } = await sb.rpc("search_profiles", { q });
+  if (error) throw error;
+  return data || [];
+}
+async function dbGetFriendships() {
+  const { data, error } = await sb.rpc("get_friendships");
+  if (error) throw error;
+  return data || [];
+}
+async function dbSendRequest(otherId) {
+  const uid = await dbUserId();
+  const { error } = await sb.from("friendships")
+    .insert({ requester_id: uid, addressee_id: otherId, status: "pending" });
+  if (error) throw error;
+}
+async function dbAcceptFriendship(id) {
+  const { error } = await sb.from("friendships")
+    .update({ status: "accepted", updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+async function dbDeleteFriendship(id) {
+  const { error } = await sb.from("friendships").delete().eq("id", id);
+  if (error) throw error;
+}

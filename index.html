@@ -337,21 +337,28 @@
     <section class="view" id="view-friends" hidden>
       <button class="back-link" id="friends-back" type="button">← Profile</button>
       <h1 class="view-title">Friends</h1>
-      <p class="view-sub">Share highlights with your crew.</p>
+      <p class="view-sub">Find your crew and share your grind.</p>
 
-      <form class="card form" id="friend-form">
-        <h2 class="card-title">Add a Friend</h2>
-        <label>Name
-          <input type="text" id="fr-name" placeholder="e.g. Marcus T." required />
-        </label>
-        <button type="submit" class="primary">Add Friend</button>
-      </form>
+      <div class="card">
+        <h2 class="card-title">Add a friend</h2>
+        <form id="friend-search-form">
+          <label>Search by username or email
+            <input type="text" id="friend-search" placeholder="willk  or  will@email.com" autocomplete="off" />
+          </label>
+        </form>
+        <div id="search-results"></div>
+      </div>
 
-      <p class="muted small" id="friends-note">
-        Their highlights are sample data for now — live sharing of real stats arrives with cloud accounts.
-      </p>
-      <ul class="friends" id="friends-list"></ul>
-      <p class="empty-hint" id="friends-empty">No friends added yet. (Two demo friends already appear in your feed.)</p>
+      <div class="card" id="requests-card" hidden>
+        <h2 class="card-title">Requests</h2>
+        <ul class="friends" id="requests-list"></ul>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Your friends</h2>
+        <ul class="friends" id="friends-list"></ul>
+        <p class="empty-hint" id="friends-empty">No friends yet. Search above to send a request.</p>
+      </div>
     </section>
 
     <!-- ===================== PRODUCTS VIEW ===================== -->
