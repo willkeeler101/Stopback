@@ -19,6 +19,8 @@ const DEFAULT_STATE = {
   likes: {},               // which feed posts you've reacted to
   // Motivation layer (XP is derived; this tracks celebrations + earned badges).
   gamify: { badges: {}, goalHitDate: "", lastStreakCelebrated: 0, streakSeen: 0 },
+  // What accepted friends are allowed to see (Phase 3).
+  privacy: { shareStats: true, shareLeads: false, sharePhone: false },
 };
 
 let editingProductId = null; // null = the product form is in "add" mode
@@ -75,7 +77,8 @@ function markActiveToday() {
   if (!state.activeDays.includes(today)) {
     state.activeDays.push(today);
     if (window.dbSaveProfile)
-      dbSaveProfile({ active_days: state.activeDays }).catch(dbFail("Couldn't save streak"));
+      dbSaveProfile({ active_days: state.activeDays, current_streak: currentStreak() })
+        .catch(dbFail("Couldn't save streak"));
   }
 }
 
@@ -1120,6 +1123,11 @@ function renderProfile() {
     </div>`;
   }).join("");
 
+  // Sharing toggles
+  document.getElementById("pv-stats").checked = state.privacy.shareStats;
+  document.getElementById("pv-leads").checked = state.privacy.shareLeads;
+  document.getElementById("pv-phone").checked = state.privacy.sharePhone;
+
   // Past-stats inputs (only show a value if it's non-zero, so placeholder shows otherwise)
   document.getElementById("b-contacts").value = state.baseline.contacts || "";
   document.getElementById("b-stopbacks").value = state.baseline.stopbacks || "";
@@ -1475,6 +1483,9 @@ async function startApp() {
   }
   initGamify(); // sync earned badges silently — no celebration on page load
   render();
+  // Keep the shareable streak in sync (e.g. if it lapsed since last login).
+  if (window.dbSaveProfile)
+    dbSaveProfile({ current_streak: currentStreak() }).catch(() => {});
 }
 
 // Wires DOM event listeners exactly once, before auth decides which screen
@@ -1563,6 +1574,20 @@ function wireEvents() {
   document.getElementById("products-back").addEventListener("click", () => switchView("profile"));
   document.getElementById("product-form").addEventListener("submit", submitProduct);
   document.getElementById("product-cancel").addEventListener("click", cancelEditProduct);
+
+  // Sharing toggles → persist to profiles (respected by the SQL functions)
+  document.getElementById("pv-stats").addEventListener("change", (e) => {
+    state.privacy.shareStats = e.target.checked;
+    dbSaveProfile({ share_stats: e.target.checked }).catch(dbFail("Couldn't save setting"));
+  });
+  document.getElementById("pv-leads").addEventListener("change", (e) => {
+    state.privacy.shareLeads = e.target.checked;
+    dbSaveProfile({ share_leads: e.target.checked }).catch(dbFail("Couldn't save setting"));
+  });
+  document.getElementById("pv-phone").addEventListener("change", (e) => {
+    state.privacy.sharePhone = e.target.checked;
+    dbSaveProfile({ share_phone: e.target.checked }).catch(dbFail("Couldn't save setting"));
+  });
 
   // Friends
   document.getElementById("open-friends").addEventListener("click", () => switchView("friends"));

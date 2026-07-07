@@ -59,6 +59,11 @@ async function dbLoadState() {
     s.activeDays = Array.isArray(profile.active_days) ? profile.active_days.slice() : [];
     s.gamify = { ...DEFAULT_STATE.gamify, ...(profile.gamify || {}) };
     s.gamify.badges = (profile.gamify && profile.gamify.badges) || {};
+    s.privacy = {
+      shareStats: profile.share_stats !== false, // default true
+      shareLeads: !!profile.share_leads,
+      sharePhone: !!profile.share_phone,
+    };
   }
   s.leads = (leadsRes.data || []).map(rowToLead);
   s.products = (productsRes.data || []).map(rowToProduct);

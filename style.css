@@ -751,6 +751,16 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
     border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 }
 
+/* ===== Sharing toggles (Phase 3) ===== */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) 0; border-bottom: 1px solid var(--line);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row input[type="checkbox"] {
+  width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--green); cursor: pointer;
+}
+
 /* ===== Auth + onboarding screens (Phase 2) ===== */
 /* These elements set their own display, so the hidden attribute needs help. */
 .app-header[hidden], .bottom-nav[hidden], .auth-screen[hidden] { display: none; }
