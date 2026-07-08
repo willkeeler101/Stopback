@@ -12,6 +12,9 @@
   --amber:     #b9791f; /* warm amber — "maybe" */
   --amber-deep:#7a4d0d; /* darkened for AA as text on cream */
   --line:    #d8c8a4;   /* borders on paper */
+  --gold:      #c9a227; /* warm metallic gold — achieved goals */
+  --gold-soft: #e6c65c;
+  --gold-deep: #9a7b1e;
 
   /* Spacing scale (4 / 8 / 12 / 16 / 24 / 32) */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
@@ -791,6 +794,92 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   .bottom-nav { max-width: 560px; margin: 0 auto;
     border-radius: var(--radius) var(--radius) 0 0;
     border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+}
+
+/* ===== Gold achieved-goal state ===== */
+.goal-col.gold .ring-fg {
+  stroke: var(--gold);
+  filter: drop-shadow(0 0 5px rgba(201, 162, 39, 0.45));
+}
+.goal-col.gold .goal-num,
+.goal-col.gold .goal-label { color: var(--gold-deep); }
+
+/* One-shot pop when the ring turns gold live (class added by the celebration,
+   not by re-renders, so it never replays) */
+.goal-col.gold-pop { animation: goldPop 0.7s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+@keyframes goldPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  70% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+
+/* Goal card while any goal is achieved: gold edge + slow, subtle sheen */
+.post-goal.gold {
+  border-color: var(--gold);
+  box-shadow: 0 1px 2px rgba(33, 28, 22, 0.04), 0 4px 14px rgba(201, 162, 39, 0.18);
+  position: relative;
+  overflow: hidden;
+}
+.post-goal.gold::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -80px;
+  width: 60px;
+  background: linear-gradient(105deg, transparent, rgba(230, 198, 92, 0.16), transparent);
+  transform: skewX(-18deg);
+  animation: goldSheen 5.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes goldSheen {
+  0%, 55%, 100% { left: -80px; }
+  25% { left: 110%; }
+}
+.hype { color: var(--gold-deep); letter-spacing: 0.05em; }
+
+/* ===== Full-screen gold celebration (~2.5s, non-blocking) ===== */
+.gold-celebration {
+  position: fixed; inset: 0; z-index: 120;
+  display: grid; place-items: center;
+  pointer-events: none;
+  background: radial-gradient(circle at center, rgba(201, 162, 39, 0.14), rgba(33, 28, 22, 0.38));
+  animation: gcFade 0.35s ease;
+  transition: opacity 0.5s ease;
+}
+.gold-celebration.gc-out { opacity: 0; }
+@keyframes gcFade { from { opacity: 0; } to { opacity: 1; } }
+
+.gc-ring {
+  position: absolute;
+  width: 130px; height: 130px;
+  border-radius: 50%;
+  border: 3px solid var(--gold);
+  opacity: 0;
+  animation: gcPulse 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.1s;
+}
+.gc-ring-2 { animation-delay: 0.5s; border-width: 2px; }
+@keyframes gcPulse {
+  0% { transform: scale(0.4); opacity: 0.9; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+
+.gc-text { text-align: center; animation: gcText 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.35); }
+@keyframes gcText {
+  0% { transform: scale(0.7); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.gc-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 2.1rem; font-weight: 900; letter-spacing: -0.01em;
+  color: var(--gold-soft);
+  text-shadow: 0 1px 14px rgba(201, 162, 39, 0.5), 0 2px 4px rgba(33, 28, 22, 0.5);
+}
+.gc-sub {
+  display: block; margin-top: 6px;
+  font-weight: 800; font-size: 0.95rem; letter-spacing: 0.12em;
+  color: var(--paper);
+  text-shadow: 0 1px 3px rgba(33, 28, 22, 0.6);
 }
 
 /* ===== Sharing toggles (Phase 3) ===== */

@@ -18,7 +18,13 @@ const DEFAULT_STATE = {
   friends: [],             // people you've added to share highlights with
   likes: {},               // which feed posts you've reacted to
   // Motivation layer (XP is derived; this tracks celebrations + earned badges).
-  gamify: { badges: {}, goalHitDate: "", lastStreakCelebrated: 0, streakSeen: 0 },
+  gamify: {
+    badges: {},
+    goalHitDate: "", // legacy (pre-gold); superseded by goalCelebrated
+    goalCelebrated: { stopbacks: "", sales: "" }, // date each goal last went gold
+    lastStreakCelebrated: 0,
+    streakSeen: 0,
+  },
   // What accepted friends are allowed to see (Phase 3).
   privacy: { shareStats: true, shareLeads: false, sharePhone: false },
 };
@@ -125,6 +131,16 @@ function stopbacksToday() {
   return state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === t).length;
 }
 
+// Sales counted by when they were actually closed (soldAt), falling back to
+// lead creation for older sales. Used by BOTH the goal ring and the gold
+// celebration trigger so the two can never disagree.
+function salesToday() {
+  const t = localDateStr();
+  return state.leads.filter(
+    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === t
+  ).length;
+}
+
 // XP weights — effort (doors/showing up) is rewarded at least as much as outcomes.
 const XP = { contact: 5, stopback: 15, missed: 10, sale: 40, activeDay: 10 };
 
@@ -189,8 +205,13 @@ function initGamify() {
   BADGES.forEach((b) => {
     if (!state.gamify.badges[b.id] && b.check()) state.gamify.badges[b.id] = "earned";
   });
-  const goal = state.profile.dailyGoal || 0;
-  if (goal > 0 && stopbacksToday() >= goal) state.gamify.goalHitDate = today;
+  // Seed the gold-celebration stamps for goals already met, so a page load
+  // or re-render can never re-fire a celebration.
+  state.gamify.goalCelebrated = state.gamify.goalCelebrated || { stopbacks: "", sales: "" };
+  const sbGoal = state.profile.dailyGoal || 0;
+  const sGoal = state.profile.salesGoal || 0;
+  if (sbGoal > 0 && stopbacksToday() >= sbGoal) state.gamify.goalCelebrated.stopbacks = today;
+  if (sGoal > 0 && salesToday() >= sGoal) state.gamify.goalCelebrated.sales = today;
   save();
   if (window.dbSaveProfile)
     dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
@@ -203,11 +224,19 @@ function runGamification(opts = {}) {
 
   if (opts.sale) party = true;
 
-  const goal = state.profile.dailyGoal || 0;
-  if (goal > 0 && stopbacksToday() >= goal && state.gamify.goalHitDate !== today) {
-    state.gamify.goalHitDate = today;
-    party = true;
-  }
+  // Daily goals → premium gold celebration, once per goal per day.
+  state.gamify.goalCelebrated = state.gamify.goalCelebrated || { stopbacks: "", sales: "" };
+  const gc = state.gamify.goalCelebrated;
+  const sbGoal = state.profile.dailyGoal || 0;
+  const sGoal = state.profile.salesGoal || 0;
+  const sbHit = sbGoal > 0 && stopbacksToday() >= sbGoal && gc.stopbacks !== today;
+  const sHit = sGoal > 0 && salesToday() >= sGoal && gc.sales !== today;
+  if (sbHit) gc.stopbacks = today;
+  if (sHit) gc.sales = today;
+  let gold = false;
+  if (sbHit && sHit) { goldCelebration("BOTH GOALS DOWN"); gold = true; }
+  else if (sbHit) { goldCelebration("STOP-BACK GOAL HIT"); gold = true; }
+  else if (sHit) { goldCelebration("SALES GOAL HIT"); gold = true; }
 
   const streak = currentStreak();
   if (STREAK_MILESTONES.includes(streak) && streak > state.gamify.lastStreakCelebrated) {
@@ -227,7 +256,8 @@ function runGamification(opts = {}) {
   save();
   if (window.dbSaveProfile)
     dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
-  if (party || newBadges.length) confettiBurst();
+  // The gold overlay is the headline moment — don't stack plain confetti on it.
+  if (!gold && (party || newBadges.length)) confettiBurst();
   newBadges.forEach((b, i) => setTimeout(() => toast(`Badge earned: ${b.name} ${b.icon}`), 700 + i * 900));
 }
 
@@ -258,6 +288,81 @@ function confettiBurst() {
     );
   }
   setTimeout(() => cont.remove(), 1900);
+}
+
+// ---- Premium gold celebration (daily goal hit) -------------------------
+const HYPE_MESSAGES = [
+  "GET ONE MORE!",
+  "ANOTHA ONE!",
+  "LET'S GO!",
+  "KEEP STACKING THEM.",
+  "BUILD THE LEAD.",
+  "STAY HOT.",
+  "ON A ROLL.",
+  "KEEP THE MOMENTUM.",
+];
+// Deterministic per seed so re-renders don't flicker the message, but each
+// new goal level / day rotates to a different line.
+function hypeLine(seed) {
+  return HYPE_MESSAGES[hashStr(seed) % HYPE_MESSAGES.length];
+}
+
+// Architecture hook for a future success chime. Intentionally silent for now.
+function playCelebrationSound() {}
+
+// Full-screen gold moment, ~2.5s. Non-blocking (pointer-events: none),
+// self-removing, honors prefers-reduced-motion. Fired only from
+// runGamification with a once-per-goal-per-day stamp — never on re-render.
+function goldCelebration(title) {
+  playCelebrationSound();
+  if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    toast("🏆 " + title);
+    return;
+  }
+
+  const ov = el(`
+    <div class="gold-celebration" aria-hidden="true">
+      <div class="gc-ring"></div>
+      <div class="gc-ring gc-ring-2"></div>
+      <div class="gc-text">
+        <span class="gc-title">${title}</span>
+        <span class="gc-sub">${hypeLine(title + localDateStr())}</span>
+      </div>
+    </div>`);
+  document.body.appendChild(ov);
+  goldConfetti(ov);
+
+  // Let the freshly-gilded ring pop once, in place.
+  document.querySelectorAll(".goal-col.gold").forEach((c) => c.classList.add("gold-pop"));
+
+  setTimeout(() => ov.classList.add("gc-out"), 2100);
+  setTimeout(() => ov.remove(), 2700);
+}
+
+// Softer, slower confetti in warm metallic golds.
+function goldConfetti(cont) {
+  const golds = ["#c9a227", "#e6c65c", "#b8912f", "#f2e2a0", "#9a7b1e"];
+  for (let i = 0; i < 24; i++) {
+    const p = document.createElement("div");
+    p.className = "confetti-piece";
+    p.style.background = golds[i % golds.length];
+    p.style.left = "50%";
+    p.style.top = "45%";
+    p.style.borderRadius = i % 3 ? "50%" : "2px";
+    cont.appendChild(p);
+    const dx = (Math.random() * 2 - 1) * (100 + Math.random() * 140);
+    const dy = 160 + Math.random() * 180;
+    const rot = Math.random() * 540 - 270;
+    p.animate(
+      [
+        { transform: "translate(0,0) rotate(0deg) scale(1)", opacity: 0.95 },
+        { transform: `translate(${dx}px,-${70 + Math.random() * 80}px) rotate(${rot / 2}deg) scale(1.05)`, opacity: 0.9, offset: 0.4 },
+        { transform: `translate(${dx * 1.25}px,${dy}px) rotate(${rot}deg) scale(0.85)`, opacity: 0 },
+      ],
+      { duration: 1700 + Math.random() * 700, easing: "cubic-bezier(0.2,0.55,0.35,1)", fill: "forwards" }
+    );
+  }
 }
 
 // Small non-blocking toast.
@@ -558,21 +663,25 @@ function streakRiskPost() {
 
 // One goal ring (SVG) with the count centered and a label underneath.
 // The real end offset is stashed in data-offset so the fill can animate in.
+// Once the original goal is achieved the ring goes GOLD, stays pinned full,
+// and the target rolls to value+1 forever (5/5 → 5/6 → 6/7 …).
 function ringHtml(value, goal, cls, label, animate) {
+  const achieved = value >= goal;
+  const shownGoal = achieved ? value + 1 : goal;
   const r = 30;
   const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - Math.min(value / goal, 1));
+  const offset = achieved ? 0 : circ * (1 - Math.min(value / goal, 1));
   const startOffset = animate ? circ : offset;
   return `
-    <div class="goal-col">
+    <div class="goal-col${achieved ? " gold" : ""}">
       <div class="goal-ring" data-offset="${offset.toFixed(1)}">
         <svg viewBox="0 0 72 72">
           <circle class="ring-bg" cx="36" cy="36" r="${r}"></circle>
-          <circle class="ring-fg ${cls} ${value >= goal ? "done" : ""}" cx="36" cy="36" r="${r}"
+          <circle class="ring-fg ${cls}" cx="36" cy="36" r="${r}"
             stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${startOffset.toFixed(1)}"></circle>
         </svg>
         <div class="goal-ring-center">
-          <span class="goal-num">${value}</span><span class="goal-of">/ ${goal}</span>
+          <span class="goal-num">${value}</span><span class="goal-of">/ ${shownGoal}</span>
         </div>
       </div>
       <span class="goal-label">${label}</span>
@@ -596,18 +705,25 @@ function goalPost(animate) {
   if (sbGoal > 0) rings.push(ringHtml(sb, sbGoal, "", "Stop backs", animate));
   if (sGoal > 0) rings.push(ringHtml(sales, sGoal, "sales", "Sales", animate));
 
-  const sbLeft = Math.max(0, sbGoal - sb);
-  const sLeft = Math.max(0, sGoal - sales);
-  const msg =
-    sbLeft === 0 && sLeft === 0
-      ? "Both goals down — everything from here is bonus. 🔥"
-      : [
-          sbLeft ? `${sbLeft} stop back${sbLeft > 1 ? "s" : ""}` : "",
-          sLeft ? `${sLeft} sale${sLeft > 1 ? "s" : ""}` : "",
-        ].filter(Boolean).join(" and ") + " to go today.";
+  const sbDone = sbGoal > 0 && sb >= sbGoal;
+  const sDone = sGoal > 0 && sales >= sGoal;
+  const anyDone = sbDone || sDone;
+  const allDone = (sbGoal <= 0 || sbDone) && (sGoal <= 0 || sDone);
+
+  // Once a goal is achieved the message flips to hype and never resets today.
+  const remaining = [
+    sbGoal > 0 && !sbDone ? `${sbGoal - sb} stop back${sbGoal - sb > 1 ? "s" : ""}` : "",
+    sGoal > 0 && !sDone ? `${sGoal - sales} sale${sGoal - sales > 1 ? "s" : ""}` : "",
+  ].filter(Boolean).join(" and ");
+  const hype = `<strong class="hype">${hypeLine("goal" + sb + "-" + sales + localDateStr())}</strong>`;
+  const msg = allDone
+    ? hype
+    : anyDone
+    ? `${hype} ${remaining} to go today.`
+    : `${remaining} to go today.`;
 
   const node = el(`
-    <article class="post post-goal">
+    <article class="post post-goal${anyDone ? " gold" : ""}">
       <div class="goal-cols">${rings.join("")}</div>
       <div class="goal-text">
         <span class="post-tag">Today's goals</span>
