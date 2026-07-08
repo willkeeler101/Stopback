@@ -444,6 +444,18 @@ button.ghost:active { transform: translateY(1px); }
 }
 .lead.status-sale { border-left-color: var(--green-deep); }
 .lead.status-missed { border-left-color: var(--red); }
+.lead { position: relative; }
+.lead .lead-name { padding-right: 48px; } /* keep clear of the pencil */
+.lead-edit {
+  position: absolute; top: var(--sp-2); right: var(--sp-2);
+  width: 40px; height: 40px;               /* comfortable tap target */
+  display: grid; place-items: center;
+  background: transparent; border: 1px solid transparent; border-radius: 10px;
+  color: var(--ink-soft); cursor: pointer;
+}
+.lead-edit svg { width: 18px; height: 18px; }
+.lead-edit:hover { background: var(--paper); border-color: var(--line); color: var(--green-deep); }
+.lead-edit:active { transform: scale(0.94); }
 .lead-name { font-weight: 800; font-size: 1.05rem; font-family: var(--font-display); }
 .lead-phone { color: var(--ink-soft); font-size: 0.9rem; }
 .lead-addr { color: var(--ink-soft); font-size: 0.85rem; margin-top: 0.15rem; }

@@ -772,6 +772,9 @@ function renderLeads() {
         : `<span class="badge">Stop back</span>`;
 
     li.innerHTML = `
+      <button class="lead-edit" type="button" title="Edit lead" aria-label="Edit lead">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 014 4L7.5 20.5 3 22l1.5-4.5z"/></svg>
+      </button>
       <div class="lead-name">${escapeHtml(l.name)}</div>
       <div class="lead-phone">${escapeHtml(l.phone)}</div>
       ${l.address ? `<div class="lead-addr">📍 ${escapeHtml(l.address)}</div>` : ""}
@@ -787,15 +790,14 @@ function renderLeads() {
         <button class="text">Text</button>
         <button class="mark-missed ${l.status === "missed" ? "on" : ""}">Missed</button>
         <button class="mark-sale ${l.status === "sale" ? "on" : ""}">Sale</button>
-        <button class="edit">Edit</button>
         <button class="del">Delete</button>
       </div>`;
 
+    li.querySelector(".lead-edit").onclick = () => openEdit(l.id); // same modal as before
     li.querySelector(".call").onclick = () => (window.location.href = "tel:" + digits);
     li.querySelector(".text").onclick = () => (window.location.href = "sms:" + digits);
     li.querySelector(".mark-missed").onclick = () => toggleStatus(l.id, "missed");
     li.querySelector(".mark-sale").onclick = () => toggleStatus(l.id, "sale");
-    li.querySelector(".edit").onclick = () => openEdit(l.id);
     li.querySelector(".del").onclick = () => deleteLead(l.id);
     listEl.appendChild(li);
   });
