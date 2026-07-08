@@ -9,6 +9,7 @@ const STORAGE_KEY = "stopback-data-v1";
 // ---- State (with defaults so old saves still load) -------------------
 const DEFAULT_STATE = {
   contactsTally: 0,        // people talked to without getting a number
+  contactsTodayCount: 0,   // today's "+1" taps (loaded from log_events)
   leads: [],               // full stop-back records
   activeDays: [],          // "YYYY-MM-DD" strings — used for streaks
   profile: { name: "", dailyGoal: 5, salesGoal: 2 },
@@ -24,6 +25,8 @@ const DEFAULT_STATE = {
     goalCelebrated: { stopbacks: "", sales: "" }, // date each goal last went gold
     lastStreakCelebrated: 0,
     streakSeen: 0,
+    records: {},           // personal bests: { key: { v, date } } — permanent
+    recordsCelebrated: {},  // { key: "YYYY-MM-DD" } — one banner per type per day
   },
   // What accepted friends are allowed to see (Phase 3).
   privacy: { shareStats: true, shareLeads: false, sharePhone: false },
@@ -141,6 +144,158 @@ function salesToday() {
   ).length;
 }
 
+// =====================================================================
+//  PERSONAL RECORDS — permanent all-time bests (stored in gamify.records)
+// =====================================================================
+const CLOSE_RATE_MIN_CONTACTS = 10; // min contacts for a close-rate record day
+
+const RECORD_LABELS = {
+  contactsDay:  (v) => `${v} Contacts Today`,
+  stopbacksDay: (v) => `${v} Stop-Backs Today`,
+  salesDay:     (v) => `${v} Sales Today`,
+  salesStreak:  (v) => `${v}-Day Sales Streak`,
+  loginStreak:  (v) => `${v}-Day Streak`,
+  closeRate:    (v) => `${v}% Close Rate Day`,
+};
+
+function ensureRecords() {
+  state.gamify.records = state.gamify.records || {};
+  state.gamify.recordsCelebrated = state.gamify.recordsCelebrated || {};
+  return state.gamify.records;
+}
+
+// All doors talked to today = "+1" taps + stop backs logged.
+function contactsToday() {
+  return (state.contactsTodayCount || 0) + stopbacksToday();
+}
+
+function mySaleDays() {
+  const days = new Set();
+  state.leads.forEach((l) => {
+    if (l.status === "sale") days.add(localDateStr(new Date(l.soldAt || l.createdAt)));
+  });
+  return [...days];
+}
+
+// Longest ever run of consecutive active days (for the login-streak record).
+function longestLoginStreak() {
+  const days = [...state.activeDays].sort();
+  let best = 0, run = 0, prev = null;
+  days.forEach((d) => {
+    if (prev) {
+      const p = new Date(prev);
+      p.setDate(p.getDate() + 1);
+      run = localDateStr(p) === d ? run + 1 : 1;
+    } else run = 1;
+    if (run > best) best = run;
+    prev = d;
+  });
+  return best;
+}
+
+// Raise a record if beaten. Returns true when it was a NEW best.
+function bumpRecord(rec, key, value, date) {
+  if (value > ((rec[key] && rec[key].v) || 0)) {
+    rec[key] = { v: value, date: date || localDateStr() };
+    return true;
+  }
+  return false;
+}
+
+// Silent backfill on load — sets the bar from history, never celebrates.
+// dailyRows (v_daily_stats) adds per-day contacts/close-rate/best-week that
+// the client can't derive from leads alone.
+function seedRecords(dailyRows) {
+  const rec = ensureRecords();
+
+  // Best stop-back / sales days from the leads on hand.
+  const byDay = {};
+  state.leads.forEach((l) => {
+    const d = localDateStr(new Date(l.createdAt));
+    byDay[d] = byDay[d] || { sb: 0, sales: 0 };
+    byDay[d].sb++;
+    if (l.status === "sale") {
+      const sd = localDateStr(new Date(l.soldAt || l.createdAt));
+      byDay[sd] = byDay[sd] || { sb: 0, sales: 0 };
+      byDay[sd].sales++;
+    }
+  });
+  Object.entries(byDay).forEach(([d, x]) => {
+    bumpRecord(rec, "stopbacksDay", x.sb, d);
+    bumpRecord(rec, "salesDay", x.sales, d);
+  });
+
+  bumpRecord(rec, "salesStreak", salesStreakFrom(mySaleDays()));
+  bumpRecord(rec, "loginStreak", longestLoginStreak());
+
+  if (dailyRows && dailyRows.length) {
+    const weeks = {};
+    dailyRows.forEach((r) => {
+      const contacts = (r.contacts || 0) + (r.stopbacks || 0);
+      bumpRecord(rec, "contactsDay", contacts, r.day);
+      const closings = (r.sales || 0) + (r.missed || 0);
+      if (contacts >= CLOSE_RATE_MIN_CONTACTS && closings > 0)
+        bumpRecord(rec, "closeRate", Math.round((r.sales / closings) * 100), r.day);
+      // Best week = most stop backs in a Mon–Sun calendar week.
+      const d = new Date(r.day + "T12:00:00");
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // back to Monday
+      const wk = localDateStr(d);
+      weeks[wk] = (weeks[wk] || 0) + (r.stopbacks || 0);
+    });
+    Object.entries(weeks).forEach(([wk, v]) => bumpRecord(rec, "bestWeek", v, wk));
+  }
+}
+
+// Action-path record check. At most ONE banner per action; a first-ever
+// record (beating 0) is stored silently — nothing to brag about yet.
+function checkRecords() {
+  const rec = ensureRecords();
+  const today = localDateStr();
+  const candidates = [
+    ["salesDay", salesToday()],
+    ["stopbacksDay", stopbacksToday()],
+    ["salesStreak", salesStreakFrom(mySaleDays())],
+    ["contactsDay", contactsToday()],
+    ["loginStreak", currentStreak()],
+  ];
+  const closings = state.leads.filter((l) => {
+    const d = localDateStr(new Date(l.soldAt || l.createdAt));
+    return d === today && (l.status === "sale" || l.status === "missed");
+  });
+  if (contactsToday() >= CLOSE_RATE_MIN_CONTACTS && closings.length > 0) {
+    const sales = closings.filter((l) => l.status === "sale").length;
+    candidates.push(["closeRate", Math.round((sales / closings.length) * 100)]);
+  }
+
+  let banner = null;
+  candidates.forEach(([key, v]) => {
+    const prev = (rec[key] && rec[key].v) || 0;
+    if (v > prev) {
+      rec[key] = { v, date: today };
+      if (prev >= 1 && state.gamify.recordsCelebrated[key] !== today) {
+        state.gamify.recordsCelebrated[key] = today;
+        if (!banner) banner = RECORD_LABELS[key](v);
+      }
+    }
+  });
+  if (banner) recordBanner(banner);
+}
+
+// Slim, premium top banner — no popup, self-removing, gold accent.
+function recordBanner(text) {
+  const b = el(`
+    <div class="pb-banner" role="status">
+      <span class="pb-trophy">🏆</span>
+      <span class="pb-copy">
+        <span class="pb-title">New Personal Best</span>
+        <span class="pb-sub">${text}</span>
+      </span>
+    </div>`);
+  document.body.appendChild(b);
+  setTimeout(() => b.classList.add("out"), 3400);
+  setTimeout(() => b.remove(), 3950);
+}
+
 // XP weights — effort (doors/showing up) is rewarded at least as much as outcomes.
 const XP = { contact: 5, stopback: 15, missed: 10, sale: 40, activeDay: 10 };
 
@@ -212,6 +367,9 @@ function initGamify() {
   const sGoal = state.profile.salesGoal || 0;
   if (sbGoal > 0 && stopbacksToday() >= sbGoal) state.gamify.goalCelebrated.stopbacks = today;
   if (sGoal > 0 && salesToday() >= sGoal) state.gamify.goalCelebrated.sales = today;
+  // Seed records from the leads on hand (v_daily_stats backfill runs async
+  // in startApp). Silent — load can never trigger a record banner.
+  seedRecords(null);
   save();
   if (window.dbSaveProfile)
     dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
@@ -252,6 +410,9 @@ function runGamification(opts = {}) {
       newBadges.push(b);
     }
   });
+
+  // Personal records (banner handled inside; persisted with the save below).
+  checkRecords();
 
   save();
   if (window.dbSaveProfile)
@@ -1319,6 +1480,8 @@ function bumpTally(amount) {
   const next = Math.max(0, state.contactsTally + amount);
   const changed = next !== state.contactsTally;
   state.contactsTally = next;
+  if (changed)
+    state.contactsTodayCount = Math.max(0, (state.contactsTodayCount || 0) + amount);
   if (amount > 0) markActiveToday();
   render();
   if (amount > 0) {
@@ -1666,6 +1829,16 @@ async function startApp() {
   // Keep the shareable streak in sync (e.g. if it lapsed since last login).
   if (window.dbSaveProfile)
     dbSaveProfile({ current_streak: currentStreak() }).catch(() => {});
+  // One-time-per-load record backfill from daily history (adds contacts/
+  // close-rate/best-week bests the client can't derive from leads alone).
+  dbGetDailyStats()
+    .then((rows) => {
+      seedRecords(rows);
+      save();
+      dbSaveProfile({ gamify: state.gamify }).catch(() => {});
+      renderProfile(); // showcase tiles pick up the backfilled bests
+    })
+    .catch((err) => console.error("[StopBack] Couldn't backfill records:", err));
   refreshFriendsOverview(); // pull the team feed's achievements
 }
 
