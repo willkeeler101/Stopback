@@ -41,11 +41,16 @@ async function dbLoadState() {
   const uid = await dbUserId();
   const s = structuredClone(DEFAULT_STATE);
 
-  const [profileRes, leadsRes, productsRes, contactRes] = await Promise.all([
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+
+  const [profileRes, leadsRes, productsRes, contactRes, contactTodayRes] = await Promise.all([
     sb.from("profiles").select("*").eq("id", uid).single(),
     sb.from("leads").select("*").eq("user_id", uid).order("created_at", { ascending: true }),
     sb.from("products").select("*").eq("user_id", uid).order("created_at", { ascending: true }),
     sb.from("log_events").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("type", "contact"),
+    sb.from("log_events").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("type", "contact")
+      .gte("created_at", dayStart.toISOString()),
   ]);
 
   const profile = profileRes.data;
@@ -73,6 +78,7 @@ async function dbLoadState() {
   s.leads = (leadsRes.data || []).map(rowToLead);
   s.products = (productsRes.data || []).map(rowToProduct);
   s.contactsTally = contactRes.count || 0;
+  s.contactsTodayCount = contactTodayRes.count || 0;
   s.friends = []; // Phase 3
   try { s.likes = JSON.parse(localStorage.getItem("stopback-likes") || "{}"); } catch (_) { s.likes = {}; }
 
@@ -158,6 +164,14 @@ async function dbGetFriendships() {
 // achievements on the team feed; later the leaderboard too).
 async function dbGetFriendsOverview() {
   const { data, error } = await sb.rpc("get_friends_overview");
+  if (error) throw error;
+  return data || [];
+}
+// Own per-day history (v_daily_stats view; RLS-scoped to self). Used once on
+// load to backfill personal records — including best-contacts day.
+async function dbGetDailyStats() {
+  const uid = await dbUserId();
+  const { data, error } = await sb.from("v_daily_stats").select("*").eq("user_id", uid);
   if (error) throw error;
   return data || [];
 }
