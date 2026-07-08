@@ -341,19 +341,88 @@ function dailyHitList() {
     }));
 }
 
-// Demo friends so the social feed feels alive before cloud sync exists.
-const DEMO_FRIENDS = [
-  { id: "demo-marcus", name: "Marcus T." },
-  { id: "demo-sasha", name: "Sasha R." },
-];
-const FRIEND_HIGHLIGHTS = [
-  (n) => ({ text: `💰 Closed ${n} sales today`, tone: "" }),
-  (n) => ({ text: `🔥 ${n}-day knock streak`, tone: "ink" }),
-  (n) => ({ text: `📈 New record: ${n} stop backs`, tone: "" }),
-  (n) => ({ text: `💪 Hit ${n * 15}% of the weekly goal`, tone: "ink" }),
-];
-
 const dayNumber = () => Math.floor(Date.now() / 86400000);
+
+// =====================================================================
+//  ACHIEVEMENTS — computed from real data (you + accepted friends)
+//  via get_friends_overview(). No sample data.
+// =====================================================================
+const SALES_WEEK_TIERS = [20, 15, 10, 5, 3]; // weekly sales milestones
+const SB_DAY_TIERS = [20, 15, 10, 5];        // stop backs in one day
+
+// Consecutive days (ending today or yesterday) with at least one sale.
+function salesStreakFrom(saleDays) {
+  const set = new Set((saleDays || []).map((d) => String(d).slice(0, 10)));
+  if (!set.size) return 0;
+  const d = new Date();
+  if (!set.has(localDateStr(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (set.has(localDateStr(d))) {
+    n++;
+    d.setDate(d.getDate() - 1);
+  }
+  return n;
+}
+
+// Two sales within 60 minutes today. Uses real sold_at timestamps, so
+// older sales without one simply don't count.
+function twoSalesInHour(times) {
+  const t = (times || []).map((x) => new Date(x).getTime()).sort((a, b) => a - b);
+  for (let i = 1; i < t.length; i++) if (t[i] - t[i - 1] <= 3600000) return true;
+  return false;
+}
+
+// Highest tier a value has reached (tiers listed high→low), or 0.
+function tierReached(value, tiers) {
+  for (const t of tiers) if (value >= t) return t;
+  return 0;
+}
+
+// Everything one person has earned right now. ids are stable per person +
+// milestone + day/week so reaction counts stay consistent.
+function achievementsFor(row) {
+  const out = [];
+  const day = localDateStr();
+  const week = "w" + Math.floor(dayNumber() / 7);
+  const uid = row.user_id;
+
+  if (twoSalesInHour(row.sale_times_today))
+    out.push({ id: `hot-${uid}-${day}`, banner: "⚡ 2 sales in one hour", tone: "ink" });
+
+  const salesStreak = salesStreakFrom(row.sale_days);
+  if (salesStreak >= 2)
+    out.push({ id: `sstreak-${uid}-${salesStreak}`, banner: `💰 ${salesStreak}-day sales streak`, tone: "" });
+
+  const wkTier = tierReached(row.sales_week, SALES_WEEK_TIERS);
+  if (wkTier)
+    out.push({ id: `wk-${uid}-${wkTier}-${week}`, banner: `🏆 ${row.sales_week} sales this week`, tone: "ink" });
+
+  const sbTier = tierReached(row.stopbacks_today, SB_DAY_TIERS);
+  if (sbTier)
+    out.push({ id: `sbd-${uid}-${sbTier}-${day}`, banner: `🚪 ${row.stopbacks_today} stop backs today`, tone: "" });
+
+  if (row.current_streak >= 2)
+    out.push({ id: `login-${uid}-${row.current_streak}`, banner: `🔥 ${row.current_streak}-day streak`, tone: "" });
+
+  return out;
+}
+
+// One achievement rendered as a feed card (same style for you + friends).
+function achievementPost(row, a) {
+  const who = row.is_self ? state.profile.name || "You" : row.display_name || "@" + row.username;
+  const tag = row.is_self ? "Your highlight" : `@${row.username} · friend`;
+  const node = el(`
+    <article class="post ${row.is_self ? "post-highlight" : "post-friend"}">
+      <div class="post-head">
+        <span class="avatar ${row.is_self ? "avatar-you" : ""}"${row.is_self ? "" : ' style="background:var(--green-deep)"'}>${initials(who)}</span>
+        <div><span class="post-author">${escapeHtml(who)}</span><span class="post-tag">${escapeHtml(tag)}</span></div>
+      </div>
+      <div class="highlight-banner ${a.tone}">${a.banner}</div>
+      <div class="post-foot"><button class="react" type="button">🔥 <span>0</span></button></div>
+    </article>`);
+  attachReact(node, a.id);
+  return node;
+}
 
 // ---- Tiny DOM + like helpers -----------------------------------------
 function el(html) {
@@ -452,55 +521,6 @@ function hitListPost() {
     rowsEl.appendChild(row);
   });
   return node;
-}
-
-function yourHighlightPosts() {
-  const out = [];
-  const me = state.profile.name || "You";
-  const av = `<span class="avatar avatar-you">${initials(me)}</span>`;
-  const streak = currentStreak();
-  const sales = salesTotal();
-  const today = localDateStr();
-  const todays = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today).length;
-  const best = bestDay();
-
-  const hl = (id, banner, tone, body) => {
-    const node = el(`
-      <article class="post post-highlight">
-        <div class="post-head">${av}<div><span class="post-author">${escapeHtml(me)}</span><span class="post-tag">Your highlight</span></div></div>
-        <div class="highlight-banner ${tone}">${banner}</div>
-        <p class="post-body">${body}</p>
-        <div class="post-foot"><button class="react" type="button">🔥 <span>0</span></button></div>
-      </article>`);
-    attachReact(node, id);
-    return node;
-  };
-
-  if (streak >= 2) out.push(hl("you-streak-" + streak, `🔥 ${streak}-day streak`, "", `${streak} days straight. Consistency is the whole game in D2D.`));
-  if (sales >= 1) out.push(hl("you-sales-" + sales, `💰 ${sales} lifetime sale${sales > 1 ? "s" : ""}`, "ink", sales === 1 ? "First one's on the board. Go get the next." : "Sales are stacking up — your pipeline works."));
-  if (todays > 0 && best > 0 && todays >= best) out.push(hl("you-record-" + today, `📈 ${todays} stop backs today`, "", "That ties or beats your best day. Record pace."));
-  return out;
-}
-
-function friendPosts() {
-  const friends = [...DEMO_FRIENDS, ...state.friends];
-  return friends.map((f) => {
-    const seed = hashStr(f.id + localDateStr());
-    const n = (seed % 5) + 2;
-    const hi = FRIEND_HIGHLIGHTS[seed % FRIEND_HIGHLIGHTS.length](n);
-    const id = "fr-" + f.id + "-" + dayNumber();
-    const node = el(`
-      <article class="post post-friend">
-        <div class="post-head">
-          <span class="avatar" style="background:var(--green-deep)">${initials(f.name)}</span>
-          <div><span class="post-author">${escapeHtml(f.name)}</span><span class="post-tag">Friend · today</span></div>
-        </div>
-        <div class="highlight-banner ${hi.tone}">${hi.text}</div>
-        <div class="post-foot"><button class="react" type="button">🔥 <span>0</span></button></div>
-      </article>`);
-    attachReact(node, id);
-    return node;
-  });
 }
 
 function weeklyRecapPost() {
@@ -616,9 +636,21 @@ function interleave(...lists) {
   return out;
 }
 
-// Animations (typing, card enter, ring fill) play on the FIRST feed build only,
-// so later re-renders (after logging, liking, etc.) don't re-type or re-jump.
+// Animations (card enter, ring fill) play on the FIRST feed build only,
+// so later re-renders (after logging, liking, etc.) don't re-jump.
 let feedAnimated = false;
+
+// Live stats for you + accepted friends — fills the feed's achievements.
+let friendsOverview = [];
+async function refreshFriendsOverview() {
+  if (!window.sb) return;
+  try {
+    friendsOverview = await dbGetFriendsOverview();
+    renderFeed();
+  } catch (err) {
+    console.error("[StopBack] Couldn't load the team feed:", err);
+  }
+}
 
 function renderFeed() {
   const name = state.profile.name ? state.profile.name.split(" ")[0] : "there";
@@ -632,15 +664,21 @@ function renderFeed() {
   const stream = document.getElementById("feed-stream");
   stream.innerHTML = "";
 
-  const friends = friendPosts();
-  const highlights = yourHighlightPosts();
+  // Real achievements from the shared overview: yours + your friends'.
+  const rows = friendsOverview || [];
+  const mine = rows
+    .filter((r) => r.is_self)
+    .flatMap((r) => achievementsFor(r).map((a) => achievementPost(r, a)));
+  const theirs = rows
+    .filter((r) => !r.is_self)
+    .flatMap((r) => achievementsFor(r).map((a) => achievementPost(r, a)));
 
   // Hit list is the point of the feed — it leads. Social mix after.
   const posts = [
     streakRiskPost(),
     goalPost(animate),
     hitListPost(),
-    ...interleave(highlights, friends),
+    ...interleave(mine, theirs),
     weeklyRecapPost(),
   ].filter(Boolean);
 
@@ -1070,10 +1108,12 @@ function toggleStatus(id, status) {
   const lead = state.leads.find((l) => l.id === id);
   if (!lead) return;
   lead.status = lead.status === status ? "stopback" : status;
+  // Real sale timestamp — powers the "2 sales in an hour" achievement.
+  lead.soldAt = lead.status === "sale" ? new Date().toISOString() : "";
   markActiveToday();
   render();
   runGamification({ sale: lead.status === "sale" });
-  dbUpdateLead(id, { status: lead.status }).catch(dbFail("Couldn't update lead"));
+  dbUpdateLead(id, { status: lead.status, sold_at: lead.soldAt }).catch(dbFail("Couldn't update lead"));
 }
 
 function deleteLead(id) {
@@ -1434,6 +1474,7 @@ async function startApp() {
   // Keep the shareable streak in sync (e.g. if it lapsed since last login).
   if (window.dbSaveProfile)
     dbSaveProfile({ current_streak: currentStreak() }).catch(() => {});
+  refreshFriendsOverview(); // pull the team feed's achievements
 }
 
 // Wires DOM event listeners exactly once, before auth decides which screen
@@ -1497,7 +1538,10 @@ function wireEvents() {
   });
 
   document.querySelectorAll(".nav-btn").forEach((btn) => {
-    btn.addEventListener("click", () => switchView(btn.dataset.view));
+    btn.addEventListener("click", () => {
+      switchView(btn.dataset.view);
+      if (btn.dataset.view === "feed") refreshFriendsOverview(); // fresh team stats
+    });
   });
 
   // Empty-state call-to-action buttons jump to the relevant tab.

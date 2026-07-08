@@ -154,6 +154,13 @@ async function dbGetFriendships() {
   if (error) throw error;
   return data || [];
 }
+// Stats overview for me + accepted friends who share stats (feeds the
+// achievements on the team feed; later the leaderboard too).
+async function dbGetFriendsOverview() {
+  const { data, error } = await sb.rpc("get_friends_overview");
+  if (error) throw error;
+  return data || [];
+}
 async function dbSendRequest(otherId) {
   const uid = await dbUserId();
   const { error } = await sb.from("friendships")
