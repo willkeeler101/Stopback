@@ -34,8 +34,11 @@ negative branch.
 - `auth.js` — auth gate + onboarding (routes: auth → onboarding → app)
 - `db.js` — ALL Supabase reads/writes (`dbLoadState`, `dbAddLead`, RPCs…)
 - `supabase.js` / `config.js` — client init / keys (config is gitignored)
-- `supabase/*.sql` — migrations the maintainer pastes into the SQL Editor:
-  `schema.sql` → `social.sql` → `feed.sql` (in that order)
+- `supabase/*.sql` — migrations the maintainer pastes into the SQL Editor,
+  named by run order: `1-core-tables…` → `2-friends-privacy…` →
+  `3-callbacks-goals-teamfeed…`. Suffixes (`ALREADY-RUN` / `RUN-ME`) track
+  status — when a new migration is added, name it `4-…-RUN-ME.sql` and
+  rename it to `…-ALREADY-RUN.sql` once the maintainer has run it.
 
 ### Postgres tables (all RLS: owner-only unless noted)
 - `profiles` — 1:1 with auth.users: username, display_name, email,

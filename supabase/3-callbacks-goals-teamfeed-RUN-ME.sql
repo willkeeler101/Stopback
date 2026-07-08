@@ -1,6 +1,6 @@
 -- ============================================================================
 -- StopBack — Phase 3 part 2 migration (covers tasks A–D)
--- Run ONCE in Supabase → SQL Editor, AFTER schema.sql and social.sql.
+-- Run ONCE in Supabase → SQL Editor, AFTER files 1 and 2 in this folder.
 -- Safe to re-run. Nothing here deletes or overwrites existing data.
 --
 -- Adds:

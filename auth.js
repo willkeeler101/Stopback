@@ -64,7 +64,7 @@ const Auth = (function () {
     } catch (err) {
       console.error("StopBack route error:", err);
       show("auth");
-      authError(err.message || "Couldn't load your profile — is the schema.sql run in Supabase?");
+      authError(err.message || "Couldn't load your profile — did you run the SQL files in the supabase folder?");
     }
   }
 

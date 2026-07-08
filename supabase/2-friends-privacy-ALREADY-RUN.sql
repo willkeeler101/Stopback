@@ -1,6 +1,6 @@
 -- ============================================================================
 -- StopBack — Social features migration (Phase 3)
--- Run this in Supabase → SQL Editor AFTER schema.sql. Safe to re-run.
+-- Run this in Supabase → SQL Editor AFTER file 1 in this folder. Safe to re-run.
 --
 -- Privacy model:
 --   * Nothing is shared until a friendship is ACCEPTED.
