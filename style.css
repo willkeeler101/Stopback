@@ -699,7 +699,6 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .goal-ring svg { width: 72px; height: 72px; transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: var(--paper-3); stroke-width: 8; }
 .ring-fg { fill: none; stroke: var(--green); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.5s ease; }
-.ring-fg.done { stroke: var(--green-deep); }
 .goal-ring-center {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
@@ -881,6 +880,61 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   color: var(--paper);
   text-shadow: 0 1px 3px rgba(33, 28, 22, 0.6);
 }
+
+/* ===== Friends leaderboard ===== */
+.post-leaderboard .lb-seg { margin: var(--sp-3) 0 var(--sp-2); }
+.lb-metric { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.lb-m {
+  flex: 1;
+  padding: 0.45rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-weight: 700; font-size: 0.82rem;
+  cursor: pointer;
+}
+.lb-m.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+
+.lb-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.lb-row:last-child { border-bottom: none; }
+.lb-row.me {
+  background: rgba(47, 107, 67, 0.07);
+  border-radius: 10px;
+  padding-left: var(--sp-2); padding-right: var(--sp-2);
+}
+.lb-rank {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center;
+  font-family: var(--font-display); font-weight: 800; font-size: 0.85rem;
+  background: var(--paper-3); color: var(--ink-soft);
+}
+.lb-rank.lb-gold { background: var(--gold); color: #fff; }
+.lb-rank.lb-silver { background: #a8a29a; color: #fff; }
+.lb-rank.lb-bronze { background: #a9723d; color: #fff; }
+.lb-row .avatar { width: 32px; height: 32px; font-size: 0.8rem; }
+.lb-name {
+  flex: 1; min-width: 0;
+  font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lb-streak { font-size: 0.75rem; color: var(--red); font-weight: 800; }
+.lb-stat {
+  text-align: right; min-width: 44px;
+  font-family: var(--font-display); font-weight: 800; font-size: 1.05rem;
+  color: var(--ink-soft);
+}
+.lb-stat em {
+  display: block; font-style: normal;
+  font-family: var(--font-body); font-weight: 600; font-size: 0.6rem;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.lb-stat.primary { color: var(--green-deep); }
 
 /* ===== Sharing toggles (Phase 3) ===== */
 .toggle-row {

@@ -744,6 +744,79 @@ function goalPost(animate) {
   return node;
 }
 
+// ---- Friends leaderboard -----------------------------------------------
+// Reads the already-loaded friendsOverview (today/week/all-time counts +
+// streaks). Tab clicks repaint only this card's rows — no full feed
+// re-render, so scroll position is untouched.
+let lbRange = "today";      // today | week | all
+let lbMetric = "stopbacks"; // stopbacks | sales
+
+function lbValue(row, metric, range) {
+  return row[metric + "_" + (range === "all" ? "all" : range)] || 0;
+}
+
+function leaderboardPost() {
+  const rows = friendsOverview || [];
+  if (!rows.length) return null;
+
+  const node = el(`
+    <article class="post post-leaderboard">
+      <div class="post-head">
+        <span class="avatar avatar-ai">🏅</span>
+        <div><span class="post-author">Leaderboard</span><span class="post-tag">You vs your crew</span></div>
+      </div>
+      <div class="seg lb-seg">
+        <button type="button" class="seg-btn" data-v="today">Today</button>
+        <button type="button" class="seg-btn" data-v="week">This Week</button>
+        <button type="button" class="seg-btn" data-v="all">All Time</button>
+      </div>
+      <div class="lb-metric">
+        <button type="button" class="lb-m" data-v="stopbacks">Stop Backs</button>
+        <button type="button" class="lb-m" data-v="sales">Sales</button>
+      </div>
+      <div class="lb-rows"></div>
+      <p class="muted small lb-hint" hidden>Add friends to make this a race. 🏁</p>
+    </article>`);
+
+  const paint = () => {
+    node.querySelectorAll(".lb-seg .seg-btn").forEach((b) =>
+      b.classList.toggle("active", b.dataset.v === lbRange)
+    );
+    node.querySelectorAll(".lb-m").forEach((b) =>
+      b.classList.toggle("active", b.dataset.v === lbMetric)
+    );
+
+    const other = lbMetric === "stopbacks" ? "sales" : "stopbacks";
+    const sorted = [...rows].sort(
+      (a, b) =>
+        lbValue(b, lbMetric, lbRange) - lbValue(a, lbMetric, lbRange) ||
+        lbValue(b, other, lbRange) - lbValue(a, other, lbRange) ||
+        (a.display_name || a.username || "").localeCompare(b.display_name || b.username || "")
+    );
+
+    node.querySelector(".lb-rows").innerHTML = sorted
+      .map((r, i) => {
+        const who = r.is_self ? "You" : r.display_name || "@" + (r.username || "");
+        const medal = i === 0 ? " lb-gold" : i === 1 ? " lb-silver" : i === 2 ? " lb-bronze" : "";
+        return `
+          <div class="lb-row${r.is_self ? " me" : ""}">
+            <span class="lb-rank${medal}">${i + 1}</span>
+            <span class="avatar ${r.is_self ? "avatar-you" : ""}" ${r.is_self ? "" : 'style="background:var(--green-deep)"'}>${initials(r.display_name || r.username || "?")}</span>
+            <span class="lb-name">${escapeHtml(who)}${r.current_streak > 0 ? ` <span class="lb-streak">🔥${r.current_streak}</span>` : ""}</span>
+            <span class="lb-stat${lbMetric === "stopbacks" ? " primary" : ""}">${lbValue(r, "stopbacks", lbRange)}<em>SB</em></span>
+            <span class="lb-stat${lbMetric === "sales" ? " primary" : ""}">${lbValue(r, "sales", lbRange)}<em>Sales</em></span>
+          </div>`;
+      })
+      .join("");
+    node.querySelector(".lb-hint").hidden = rows.length > 1;
+  };
+
+  node.querySelectorAll(".lb-seg .seg-btn").forEach((b) => (b.onclick = () => { lbRange = b.dataset.v; paint(); }));
+  node.querySelectorAll(".lb-m").forEach((b) => (b.onclick = () => { lbMetric = b.dataset.v; paint(); }));
+  paint();
+  return node;
+}
+
 // Round-robin merge so the feed mixes coach / you / friends.
 function interleave(...lists) {
   const out = [];
@@ -795,6 +868,7 @@ function renderFeed() {
     goalPost(animate),
     hitListPost(),
     ...interleave(mine, theirs),
+    leaderboardPost(),
     weeklyRecapPost(),
   ].filter(Boolean);
 

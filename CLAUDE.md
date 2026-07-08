@@ -72,7 +72,14 @@ negative branch.
   friends: [],              // managed via RPCs, not this array
   likes: { "like:<postId>": true },   // local-only (localStorage)
   privacy: { shareStats, shareLeads, sharePhone },
-  gamify: { badges, goalHitDate, lastStreakCelebrated, streakSeen }
+  gamify: {
+    badges, lastStreakCelebrated, streakSeen,
+    goalHitDate,      // legacy, unused
+    goalCelebrated: { stopbacks: "YYYY-MM-DD", sales: "YYYY-MM-DD" }
+    // ^ date each daily goal last triggered the GOLD celebration; checked in
+    //   runGamification (user actions only) and seeded silently in initGamify
+    //   so page loads / re-renders can never re-celebrate.
+  }
 }
 ```
 Derived totals fold in `baseline` (see `contactsTotal()` etc.). XP/levels are
@@ -84,7 +91,12 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   callbacks pinned on top with time shown, then rotating picks — who to
   text/call/stop back; **no selling advice, ever** — the maintainer removed
   the AI coach on purpose), real **achievements** for self + friends
-  (from `get_friends_overview`), weekly recap.
+  (from `get_friends_overview`), **friends leaderboard** (Today/This Week/
+  All Time tabs × Stop Backs/Sales metric, effort-first default, top-3
+  medal ranks, self-row highlighted; repaints rows in place), weekly recap.
+  Daily goals go **GOLD** when hit (metallic ring + card sheen + ~2.5s
+  full-screen celebration) and the target rolls +1 forever (5/5 → 5/6 → 6/7)
+  with rotating hype lines — gold never resets that day.
 - **Leads** — searchable list; call/text/missed/sale/delete/edit; interest +
   callback badges.
 - **Log** (center, larger) — counters, +1 tally, Add Stop Back form
