@@ -290,6 +290,28 @@ function formatDateShort(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+// ---- Callback date+time helpers ---------------------------------------
+// State stores callbackAt as a full ISO (UTC) string; the datetime-local
+// input wants a local "YYYY-MM-DDTHH:MM" string. Convert between the two.
+function toLocalInputValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+// "Today 6:00 PM" for today's callbacks, "Jul 10 6:00 PM" otherwise.
+function formatCallback(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (localDateStr(d) === localDateStr()) return "Today " + time;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + time;
+}
+// A callback is overdue once its exact time has passed.
+function callbackOverdue(iso) {
+  return !!iso && new Date(iso).getTime() < Date.now();
+}
 // Simple deterministic hash so the daily hit list rotates predictably.
 function hashStr(str) {
   str = String(str);
@@ -555,7 +577,7 @@ function callbacksPost() {
   const rows = node.querySelector(".cb-rows");
   due.forEach((l) => {
     const digits = phoneDigits(l.phone);
-    const label = l.callback === today ? "Due today" : "Overdue · " + formatDateShort(l.callback);
+    const label = (callbackOverdue(l.callbackAt) ? "Overdue · " : "") + formatCallback(l.callbackAt);
     const row = el(`
       <div class="hit">
         <span class="hit-rank" style="background:var(--red)">!</span>
@@ -569,7 +591,11 @@ function callbacksPost() {
           <button class="cb-done" type="button">Done</button>
         </div>
       </div>`);
-    row.querySelector(".cb-done").onclick = () => { l.callback = ""; render(); };
+    row.querySelector(".cb-done").onclick = () => {
+      l.callbackAt = "";
+      render();
+      dbUpdateLead(l.id, { callback_at: "" }).catch(dbFail("Couldn't update callback"));
+    };
     rows.appendChild(row);
   });
   return node;
@@ -823,12 +849,17 @@ function bestDay() {
   return values.length ? Math.max(...values) : 0;
 }
 
-// Leads with a callback date that's today or in the past (still open).
+// Open leads whose callback is due today (even if later today) or overdue.
+// Sorted soonest-first so the most urgent is always on top.
 function dueCallbacks() {
   const today = localDateStr();
   return state.leads
-    .filter((l) => l.status === "stopback" && l.callback && l.callback <= today)
-    .sort((a, b) => a.callback.localeCompare(b.callback));
+    .filter((l) => {
+      if (l.status !== "stopback" || !l.callbackAt) return false;
+      const d = new Date(l.callbackAt);
+      return d.getTime() < Date.now() || localDateStr(d) === today;
+    })
+    .sort((a, b) => new Date(a.callbackAt) - new Date(b.callbackAt));
 }
 
 // =====================================================================
@@ -880,7 +911,7 @@ function renderLeads() {
         ${statusBadge}
         ${l.interest ? `<span class="badge interest-${l.interest.toLowerCase()}">${escapeHtml(l.interest)}</span>` : ""}
         ${l.demeanor ? `<span class="badge demeanor">${escapeHtml(l.demeanor)}</span>` : ""}
-        ${l.callback ? `<span class="badge callback">📞 ${formatDateShort(l.callback)}</span>` : ""}
+        ${l.callbackAt ? `<span class="badge callback">📞 ${formatCallback(l.callbackAt)}</span>` : ""}
       </div>
       <div class="lead-actions">
         <button class="call">Call</button>
@@ -1165,7 +1196,10 @@ function addLead(e) {
     demeanor: "",                                       // legacy field, kept for old data
     interest: document.getElementById("f-interest").value || "", // Interested | Maybe | Unlikely
     notes: document.getElementById("f-notes").value.trim(),
-    callback: document.getElementById("f-callback").value || "",
+    // datetime-local gives a local "YYYY-MM-DDTHH:MM"; store real ISO (UTC).
+    callbackAt: document.getElementById("f-callback").value
+      ? new Date(document.getElementById("f-callback").value).toISOString()
+      : "",
     status: "stopback",
     createdAt: new Date().toISOString(),
   };
@@ -1241,7 +1275,7 @@ function openEdit(id) {
   document.getElementById("e-address").value = l.address || "";
   document.getElementById("e-demeanor").value = l.demeanor || "Neutral";
   document.getElementById("e-notes").value = l.notes || "";
-  document.getElementById("e-callback").value = l.callback || "";
+  document.getElementById("e-callback").value = toLocalInputValue(l.callbackAt);
   document.getElementById("edit-modal").hidden = false;
 }
 
@@ -1259,12 +1293,13 @@ function submitEdit(e) {
   l.address = document.getElementById("e-address").value.trim();
   l.demeanor = document.getElementById("e-demeanor").value;
   l.notes = document.getElementById("e-notes").value.trim();
-  l.callback = document.getElementById("e-callback").value || "";
+  const cbVal = document.getElementById("e-callback").value;
+  l.callbackAt = cbVal ? new Date(cbVal).toISOString() : ""; // cleared = "none set"
   closeEdit();
   render();
   dbUpdateLead(id, {
     name: l.name, phone: l.phone, address: l.address,
-    demeanor: l.demeanor, notes: l.notes, callback: l.callback,
+    demeanor: l.demeanor, notes: l.notes, callback_at: l.callbackAt,
   }).catch(dbFail("Couldn't save changes"));
 }
 
@@ -1500,7 +1535,7 @@ function exportCsv() {
     l.address,
     l.demeanor,
     l.status,
-    l.callback || "",
+    l.callbackAt ? new Date(l.callbackAt).toLocaleString() : "",
     l.notes || "",
     new Date(l.createdAt).toLocaleString(),
   ]);

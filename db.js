@@ -28,7 +28,8 @@ function rowToLead(r) {
   return {
     id: r.id, name: r.name, phone: r.phone || "", address: r.address || "",
     interest: r.interest || "", demeanor: r.demeanor || "", notes: r.notes || "",
-    callback: r.callback || "", status: r.status, createdAt: r.created_at,
+    callbackAt: r.callback_at || "", soldAt: r.sold_at || "",
+    status: r.status, createdAt: r.created_at,
   };
 }
 function rowToProduct(r) {
@@ -80,13 +81,14 @@ async function dbAddLead(l) {
   const { error } = await sb.from("leads").insert({
     id: l.id, user_id: uid, name: l.name, phone: l.phone, address: l.address,
     interest: l.interest || null, demeanor: l.demeanor || null, notes: l.notes,
-    callback: l.callback || null, status: l.status, created_at: l.createdAt,
+    callback_at: l.callbackAt || null, status: l.status, created_at: l.createdAt,
   });
   if (error) throw error;
 }
 async function dbUpdateLead(id, patch) {
   const p = { ...patch, updated_at: new Date().toISOString() };
-  if ("callback" in p) p.callback = p.callback || null;
+  if ("callback_at" in p) p.callback_at = p.callback_at || null;
+  if ("sold_at" in p) p.sold_at = p.sold_at || null;
   if ("interest" in p) p.interest = p.interest || null;
   const { error } = await sb.from("leads").update(p).eq("id", id);
   if (error) throw error;
