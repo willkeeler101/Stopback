@@ -75,13 +75,22 @@ negative branch.
   gamify: {
     badges, lastStreakCelebrated, streakSeen,
     goalHitDate,      // legacy, unused
-    goalCelebrated: { stopbacks: "YYYY-MM-DD", sales: "YYYY-MM-DD" }
+    goalCelebrated: { stopbacks: "YYYY-MM-DD", sales: "YYYY-MM-DD" },
     // ^ date each daily goal last triggered the GOLD celebration; checked in
     //   runGamification (user actions only) and seeded silently in initGamify
     //   so page loads / re-renders can never re-celebrate.
+    records: { contactsDay|stopbacksDay|salesDay|salesStreak|loginStreak|
+               closeRate|bestWeek: { v, date } },   // permanent personal bests
+    recordsCelebrated: { key: "YYYY-MM-DD" }        // one banner/type/day
   }
 }
 ```
+Personal records: checked in `checkRecords()` (action path only) → slim gold
+"New Personal Best" banner (`recordBanner`), max one per action; history is
+seeded silently on load from leads + `v_daily_stats` (`seedRecords`), which
+also backfills best-contacts-day / close-rate / best-week. Close-rate record
+days require ≥ `CLOSE_RATE_MIN_CONTACTS` (10) contacts. `state.contactsTodayCount`
+(transient) tracks today's +1 taps for contact records/tiers.
 Derived totals fold in `baseline` (see `contactsTotal()` etc.). XP/levels are
 derived (`computeXP()`, effort-weighted); badges checked against live data.
 
@@ -91,9 +100,15 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   callbacks pinned on top with time shown, then rotating picks — who to
   text/call/stop back; **no selling advice, ever** — the maintainer removed
   the AI coach on purpose), real **achievements** for self + friends
-  (from `get_friends_overview`), **friends leaderboard** (Today/This Week/
-  All Time tabs × Stop Backs/Sales metric, effort-first default, top-3
-  medal ranks, self-row highlighted; repaints rows in place), weekly recap.
+  (from `get_friends_overview`; includes goal-reached, record-broken,
+  badge-earned, passed-yesterday, contact tiers — timestamped, ≤4/person),
+  **Pace card** (projected finish, ahead/behind vs a 9AM–9PM day window),
+  **Insight card** (one positive friend comparison), **friends leaderboard**
+  (Today/This Week/All Time tabs × Stop Backs/Sales metric, effort-first
+  default, top-3 medal ranks, self-row highlighted; repaints rows in place),
+  **Weekly Recognition** (live weekly award leaders, gold accents), weekly
+  recap. Profile has an **Achievement Showcase** (collectible tiles; record
+  tiles gold; keeps p-contacts/p-stopbacks/p-sales/p-days ids).
   Daily goals go **GOLD** when hit (metallic ring + card sheen + ~2.5s
   full-screen celebration) and the target rolls +1 forever (5/5 → 5/6 → 6/7)
   with rotating hype lines — gold never resets that day.

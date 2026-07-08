@@ -1562,14 +1562,47 @@ function renderStatsDetail() {
 // =====================================================================
 //  PROFILE
 // =====================================================================
+
+// Achievement Showcase — collectible-style tiles. Record tiles go gold once
+// a real best exists. Keeps the p-contacts/p-stopbacks/p-sales/p-days ids so
+// live updates from the baseline inputs keep working.
+function buildShowcase() {
+  const rec = ensureRecords();
+  const topBadge = [...BADGES].reverse().find((b) => state.gamify.badges[b.id]);
+  const rv = (k) => (rec[k] && rec[k].v) || 0;
+
+  const tiles = [
+    { icon: topBadge ? topBadge.icon : "🎖", label: "Top Badge", value: topBadge ? topBadge.name : "None yet", small: !!topBadge },
+    { icon: "💰", label: "Sales Streak", value: salesStreakFrom(mySaleDays()) + "d" },
+    { icon: "🔥", label: "Login Streak", value: currentStreak() + "d" },
+    { icon: "🤝", label: "Lifetime Sales", value: salesTotal(), id: "p-sales" },
+    { icon: "📈", label: "Lifetime Stop-Backs", value: stopbacksTotal(), id: "p-stopbacks" },
+    { icon: "🚪", label: "Lifetime Contacts", value: contactsTotal(), id: "p-contacts" },
+    { icon: "🗓", label: "Active Days", value: state.activeDays.length, id: "p-days" },
+    { icon: "🏆", label: "Best Sales Day", value: rv("salesDay"), gold: rv("salesDay") > 0 },
+    { icon: "🏆", label: "Best Stop-Back Day", value: rv("stopbacksDay"), gold: rv("stopbacksDay") > 0 },
+    { icon: "🏆", label: "Best Contacts Day", value: rv("contactsDay"), gold: rv("contactsDay") > 0 },
+    { icon: "🏆", label: "Best Week", value: rv("bestWeek") + " SB", gold: rv("bestWeek") > 0 },
+    { icon: "🎯", label: "Best Close Rate", value: rv("closeRate") + "%", gold: rv("closeRate") > 0 },
+  ];
+
+  document.getElementById("showcase").innerHTML = tiles
+    .map(
+      (t) => `
+      <div class="sc-tile${t.gold ? " gold" : ""}">
+        <span class="sc-icon">${t.icon}</span>
+        <span class="sc-value${t.small ? " sc-small" : ""}"${t.id ? ` id="${t.id}"` : ""}>${t.value}</span>
+        <span class="sc-label">${t.label}</span>
+      </div>`
+    )
+    .join("");
+}
+
 function renderProfile() {
   document.getElementById("p-name").value = state.profile.name;
   document.getElementById("p-goal").value = state.profile.dailyGoal;
   document.getElementById("p-sales-goal").value = state.profile.salesGoal;
-  document.getElementById("p-contacts").textContent = contactsTotal();
-  document.getElementById("p-stopbacks").textContent = stopbacksTotal();
-  document.getElementById("p-sales").textContent = salesTotal();
-  document.getElementById("p-days").textContent = state.activeDays.length;
+  buildShowcase();
 
   // Level + XP
   const xp = computeXP();

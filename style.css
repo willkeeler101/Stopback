@@ -881,6 +881,40 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   text-shadow: 0 1px 3px rgba(33, 28, 22, 0.6);
 }
 
+/* ===== Achievement Showcase (Profile) ===== */
+.showcase {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2);
+}
+.sc-tile {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3) var(--sp-2);
+  text-align: center;
+}
+.sc-tile.gold {
+  border-color: var(--gold);
+  box-shadow: 0 2px 10px rgba(201, 162, 39, 0.14);
+}
+.sc-icon { font-size: 1.35rem; display: block; line-height: 1; }
+.sc-value {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 900; font-size: 1.35rem; line-height: 1.15;
+  margin-top: var(--sp-1);
+}
+.sc-value.sc-small { font-size: 1rem; }
+.sc-tile.gold .sc-value { color: var(--gold-deep); }
+.sc-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.66rem; font-weight: 700;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
 /* ===== Weekly Recognition ===== */
 .avatar-gold { background: linear-gradient(135deg, var(--gold), var(--gold-deep)); }
 .post-recognition { border-top: 3px solid var(--gold); }
