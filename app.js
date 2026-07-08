@@ -644,39 +644,85 @@ function tierReached(value, tiers) {
   return 0;
 }
 
-// Everything one person has earned right now. ids are stable per person +
-// milestone + day/week so reaction counts stay consistent.
+const CONTACT_DAY_TIERS = [50, 30, 20];      // contacts talked to in one day
+const FEED_EVENTS_PER_PERSON = 4;            // keep the feed calm
+
+// Everything one person has earned right now, most significant first,
+// capped per person. ids are stable per person + milestone + day/week so
+// reaction counts stay consistent across re-renders. Each event carries a
+// timestamp label (real time where derivable, "Today"/"This week" otherwise).
 function achievementsFor(row) {
   const out = [];
   const day = localDateStr();
   const week = "w" + Math.floor(dayNumber() / 7);
   const uid = row.user_id;
+  const g = row.gamify || {};
 
-  if (twoSalesInHour(row.sale_times_today))
-    out.push({ id: `hot-${uid}-${day}`, banner: "⚡ 2 sales in one hour", tone: "ink" });
+  // Broke a personal record today (shared via gamify.records).
+  const recs = g.records || {};
+  const brokeToday = Object.keys(recs).filter(
+    (k) => recs[k] && recs[k].date === day && RECORD_LABELS[k]
+  );
+  if (brokeToday.length) {
+    const k = brokeToday[0];
+    out.push({ id: `rec-${uid}-${k}-${day}`, banner: `🏆 New personal best — ${RECORD_LABELS[k](recs[k].v)}`, tone: "ink", time: "Today" });
+  }
+
+  if (twoSalesInHour(row.sale_times_today)) {
+    const times = row.sale_times_today || [];
+    const last = times.length ? new Date(times[times.length - 1]) : null;
+    out.push({
+      id: `hot-${uid}-${day}`, banner: "⚡ 2 sales in one hour", tone: "ink",
+      time: last ? last.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Today",
+    });
+  }
+
+  // Reached today's goals (goals now shared through the overview).
+  if ((row.daily_goal || 0) > 0 && row.stopbacks_today >= row.daily_goal)
+    out.push({ id: `goal-${uid}-${day}`, banner: "🎯 Reached today's stop-back goal", tone: "", time: "Today" });
+  if ((row.daily_sales_goal || 0) > 0 && row.sales_today >= row.daily_sales_goal)
+    out.push({ id: `sgoal-${uid}-${day}`, banner: "💰 Hit today's sales goal", tone: "ink", time: "Today" });
 
   const salesStreak = salesStreakFrom(row.sale_days);
   if (salesStreak >= 2)
-    out.push({ id: `sstreak-${uid}-${salesStreak}`, banner: `💰 ${salesStreak}-day sales streak`, tone: "" });
+    out.push({ id: `sstreak-${uid}-${salesStreak}`, banner: `💰 ${salesStreak}-day sales streak`, tone: "", time: "Today" });
+
+  // Earned a badge today.
+  const badges = g.badges || {};
+  const badgeToday = BADGES.find((b) => badges[b.id] === day);
+  if (badgeToday)
+    out.push({ id: `bdg-${uid}-${badgeToday.id}`, banner: `${badgeToday.icon} Earned "${badgeToday.name}"`, tone: "ink", time: "Today" });
+
+  // Passed yesterday's stop-back total.
+  if ((row.stopbacks_yesterday || 0) > 0 && row.stopbacks_today > row.stopbacks_yesterday)
+    out.push({
+      id: `pyd-${uid}-${day}`, banner: "📈 Passed yesterday's total", tone: "",
+      time: `${row.stopbacks_today} vs ${row.stopbacks_yesterday}`,
+    });
 
   const wkTier = tierReached(row.sales_week, SALES_WEEK_TIERS);
   if (wkTier)
-    out.push({ id: `wk-${uid}-${wkTier}-${week}`, banner: `🏆 ${row.sales_week} sales this week`, tone: "ink" });
+    out.push({ id: `wk-${uid}-${wkTier}-${week}`, banner: `🏆 ${row.sales_week} sales this week`, tone: "ink", time: "This week" });
 
   const sbTier = tierReached(row.stopbacks_today, SB_DAY_TIERS);
   if (sbTier)
-    out.push({ id: `sbd-${uid}-${sbTier}-${day}`, banner: `🚪 ${row.stopbacks_today} stop backs today`, tone: "" });
+    out.push({ id: `sbd-${uid}-${sbTier}-${day}`, banner: `🚪 ${row.stopbacks_today} stop backs today`, tone: "", time: "Today" });
+
+  const contacts = (row.contact_taps_today || 0) + (row.stopbacks_today || 0);
+  const cTier = tierReached(contacts, CONTACT_DAY_TIERS);
+  if (cTier)
+    out.push({ id: `cd-${uid}-${cTier}-${day}`, banner: `💪 ${contacts} contacts today`, tone: "", time: "Today" });
 
   if (row.current_streak >= 2)
-    out.push({ id: `login-${uid}-${row.current_streak}`, banner: `🔥 ${row.current_streak}-day streak`, tone: "" });
+    out.push({ id: `login-${uid}-${row.current_streak}`, banner: `🔥 ${row.current_streak}-day streak`, tone: "", time: "Today" });
 
-  return out;
+  return out.slice(0, FEED_EVENTS_PER_PERSON);
 }
 
 // One achievement rendered as a feed card (same style for you + friends).
 function achievementPost(row, a) {
   const who = row.is_self ? state.profile.name || "You" : row.display_name || "@" + row.username;
-  const tag = row.is_self ? "Your highlight" : `@${row.username} · friend`;
+  const tag = `${row.is_self ? "Your highlight" : "@" + (row.username || "")} · ${a.time || "Today"}`;
   const node = el(`
     <article class="post ${row.is_self ? "post-highlight" : "post-friend"}">
       <div class="post-head">
@@ -1043,6 +1089,106 @@ function leaderboardPost() {
   return node;
 }
 
+// ---- Weekly Recognition ---------------------------------------------------
+// Live leaders across this week's five awards. Needs a crew of 2+.
+const RECOGNITION_MIN_CONTACTS_WEEK = 15; // close-rate award eligibility
+
+function weeklyRecognitionPost() {
+  const rows = friendsOverview || [];
+  if (rows.length < 2) return null;
+
+  const contactsWeek = (r) => (r.contact_taps_week || 0) + (r.stopbacks_week || 0);
+  const closeRateWeek = (r) => {
+    const closings = (r.sales_week || 0) + (r.missed_week || 0);
+    if (!closings || contactsWeek(r) < RECOGNITION_MIN_CONTACTS_WEEK) return -1;
+    return (r.sales_week || 0) / closings;
+  };
+
+  const awards = [
+    { icon: "🏆", name: "Top Stop-Backs", val: (r) => r.stopbacks_week || 0, fmt: (v) => v },
+    { icon: "💰", name: "Top Sales", val: (r) => r.sales_week || 0, fmt: (v) => v },
+    { icon: "🎯", name: "Highest Close Rate", val: closeRateWeek, fmt: (v) => Math.round(v * 100) + "%" },
+    { icon: "💪", name: "Iron Man", val: contactsWeek, fmt: (v) => v + " contacts" },
+    { icon: "🔥", name: "Sales Streak", val: (r) => salesStreakFrom(r.sale_days), fmt: (v) => v + " days" },
+  ];
+
+  const rowsHtml = awards
+    .map((a) => {
+      const winner = [...rows].sort((x, y) => a.val(y) - a.val(x))[0];
+      const v = a.val(winner);
+      if (v <= 0) return "";
+      const who = winner.is_self ? "You" : winner.display_name || "@" + (winner.username || "");
+      return `
+        <div class="wr-row">
+          <span class="wr-icon">${a.icon}</span>
+          <span class="wr-award">${a.name}</span>
+          <span class="wr-winner${winner.is_self ? " me" : ""}">${escapeHtml(who)}</span>
+          <span class="wr-value">${a.fmt(v)}</span>
+        </div>`;
+    })
+    .join("");
+  if (!rowsHtml.trim()) return null;
+
+  return el(`
+    <article class="post post-recognition">
+      <div class="post-head">
+        <span class="avatar avatar-gold">🏆</span>
+        <div><span class="post-author">Weekly Recognition</span><span class="post-tag">This week's leaders</span></div>
+      </div>
+      <div class="wr-rows">${rowsHtml}</div>
+    </article>`);
+}
+
+// ---- Friend comparison insight ---------------------------------------------
+// One positive, motivating line. Never negative framing.
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function insightPost() {
+  const rows = friendsOverview || [];
+  const me = rows.find((r) => r.is_self);
+  if (!me || rows.length < 2) return null;
+
+  const byToday = [...rows].sort((a, b) => (b.stopbacks_today || 0) - (a.stopbacks_today || 0));
+  const myIdx = byToday.indexOf(me);
+  const friendsCount = rows.length - 1;
+  let msg = null;
+
+  if (myIdx === 0 && (me.stopbacks_today || 0) > 0) {
+    msg = "You're leading the crew today. Keep the pressure on.";
+  }
+  if (!msg) {
+    const behindMe = byToday.length - 1 - myIdx;
+    const pct = Math.round((behindMe / friendsCount) * 100);
+    if (pct >= 60) msg = `You're ahead of ${pct}% of your friends today.`;
+  }
+  if (!msg) {
+    const byWeekSales = [...rows].sort((a, b) => (b.sales_week || 0) - (a.sales_week || 0));
+    if (byWeekSales[0] !== me && (byWeekSales[0].sales_week || 0) > 0) {
+      const gap = byWeekSales[0].sales_week - (me.sales_week || 0);
+      if (gap > 0 && gap <= 3)
+        msg = `You're only ${gap} sale${gap > 1 ? "s" : ""} behind first place this week.`;
+    }
+  }
+  if (!msg && myIdx > 0) {
+    const above = byToday[myIdx - 1];
+    const need = (above.stopbacks_today || 0) - (me.stopbacks_today || 0) + 1;
+    msg = `${need} more stop-back${need > 1 ? "s" : ""} moves you into ${ordinal(myIdx)} place today.`;
+  }
+  if (!msg) return null;
+
+  return el(`
+    <article class="post post-insight">
+      <div class="post-head">
+        <span class="avatar avatar-ai">📊</span>
+        <div><span class="post-author">Insight</span><span class="post-tag">You vs the crew</span></div>
+      </div>
+      <p class="post-body">${msg}</p>
+    </article>`);
+}
+
 // Round-robin merge so the feed mixes coach / you / friends.
 function interleave(...lists) {
   const out = [];
@@ -1095,7 +1241,9 @@ function renderFeed() {
     pacePost(),
     hitListPost(),
     ...interleave(mine, theirs),
+    insightPost(),
     leaderboardPost(),
+    weeklyRecognitionPost(),
     weeklyRecapPost(),
   ].filter(Boolean);
 
