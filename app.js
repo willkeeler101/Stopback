@@ -905,6 +905,71 @@ function goalPost(animate) {
   return node;
 }
 
+// ---- Daily pace indicator ------------------------------------------------
+// Projects today's finish from the rep's actual rate so far. Day window:
+// first logged lead today (fallback 9 AM) through PACE_DAY_END_HOUR.
+const PACE_DAY_END_HOUR = 21; // selling day assumed done by 9 PM
+
+function pacePost() {
+  const goal = state.profile.dailyGoal || 0;
+  if (goal <= 0) return null;
+
+  const sb = stopbacksToday();
+  const now = new Date();
+  const todayLeads = state.leads.filter(
+    (l) => localDateStr(new Date(l.createdAt)) === localDateStr()
+  );
+
+  let start = new Date();
+  start.setHours(9, 0, 0, 0);
+  if (todayLeads.length) {
+    const first = Math.min(...todayLeads.map((l) => new Date(l.createdAt).getTime()));
+    if (first < start.getTime()) start = new Date(first);
+  }
+  const end = new Date();
+  end.setHours(PACE_DAY_END_HOUR, 0, 0, 0);
+
+  let msg;
+  let gold = false;
+  if (now >= end) {
+    msg = sb >= goal
+      ? `Day's done — goal completed with <strong>${sb}</strong>.`
+      : `Day's done — <strong>${sb}</strong> on the board.`;
+  } else if (sb === 0) {
+    msg = "Log your first door to start today's pace.";
+  } else {
+    const elapsedH = Math.max(0.25, (now - start) / 3600000);
+    const remainingH = Math.max(0, (end - now) / 3600000);
+    const projected = Math.round(sb + (sb / elapsedH) * remainingH);
+    if (sb >= goal) {
+      gold = true;
+      msg = `Completed today's goal. On pace for <strong>${Math.max(projected, sb)}</strong> today.`;
+    } else {
+      const frac = Math.min(1, Math.max(0, (now - start) / Math.max(1, end - start)));
+      const expected = Math.ceil(goal * frac);
+      const diff = sb - expected;
+      if (diff >= 0) {
+        msg = `Ahead of pace — on track for <strong>${Math.max(projected, goal)}</strong> stop-backs today.`;
+      } else {
+        const next = new Date(now);
+        next.setMinutes(0, 0, 0);
+        next.setHours(next.getHours() + 1);
+        const nextLabel = next.toLocaleTimeString([], { hour: "numeric" });
+        msg = `Behind pace by <strong>${-diff}</strong>. ${-diff} more before ${nextLabel} keeps today's goal in reach.`;
+      }
+    }
+  }
+
+  return el(`
+    <article class="post post-pace${gold ? " gold-edge" : ""}">
+      <div class="post-head">
+        <span class="avatar avatar-ai">⏱</span>
+        <div><span class="post-author">Pace</span><span class="post-tag">Based on today so far</span></div>
+      </div>
+      <p class="post-body">${msg}</p>
+    </article>`);
+}
+
 // ---- Friends leaderboard -----------------------------------------------
 // Reads the already-loaded friendsOverview (today/week/all-time counts +
 // streaks). Tab clicks repaint only this card's rows — no full feed
@@ -1027,6 +1092,7 @@ function renderFeed() {
   const posts = [
     streakRiskPost(),
     goalPost(animate),
+    pacePost(),
     hitListPost(),
     ...interleave(mine, theirs),
     leaderboardPost(),

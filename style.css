@@ -881,6 +881,10 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   text-shadow: 0 1px 3px rgba(33, 28, 22, 0.6);
 }
 
+/* ===== Daily pace card ===== */
+.post-pace .post-body strong { font-family: var(--font-display); font-size: 1.05rem; }
+.post-pace.gold-edge { border-left: 4px solid var(--gold); }
+
 /* ===== "New Personal Best" banner ===== */
 .pb-banner {
   position: fixed;
