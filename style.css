@@ -284,6 +284,21 @@ h1, h2, h3, .wordmark, .view-title, .card-title, .streak-num,
 /* Hit-list rows inside a post sit flush */
 .post .hit:first-of-type { padding-top: 0.3rem; }
 
+/* ===== Featured Hit List — the biggest card on the feed ===== */
+.post-hitlist { border: 2px solid var(--green); }
+.post-hitlist .hl-heading {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+.avatar.big { width: 46px; height: 46px; font-size: 1.25rem; }
+.post-hitlist .hit { padding: var(--sp-3) 0; }
+.post-hitlist .hit-name { font-size: 1.08rem; }
+.post-hitlist .hit-method { font-size: 0.88rem; }
+.hit-rank.urgent { background: var(--red); }
+.hit-method.due { color: var(--red); font-weight: 700; }
+
 /* ===== Friends management ===== */
 .friends { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; }
 .friend-item {

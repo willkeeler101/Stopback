@@ -323,9 +323,9 @@ function hashStr(str) {
 // =====================================================================
 //  FEED
 // =====================================================================
-const METHODS = ["Text", "Call", "Knock in person"];
+const METHODS = ["Text", "Call", "Stop back in person"];
 
-// Pick up to 3 stop-backs to chase today; rotates day to day.
+// Pick up to 5 stop-backs to chase today; rotates day to day.
 function dailyHitList() {
   const day = localDateStr();
   const dayIndex = Math.floor(Date.now() / 86400000);
@@ -334,40 +334,12 @@ function dailyHitList() {
   return candidates
     .map((l) => ({ lead: l, score: hashStr(l.id + day) }))
     .sort((a, b) => a.score - b.score)
-    .slice(0, 3)
+    .slice(0, 5)
     .map((item, i) => ({
       lead: item.lead,
       method: METHODS[(dayIndex + i) % METHODS.length],
     }));
 }
-
-// ---- Coaching content -------------------------------------------------
-const APPROACH = {
-  Friendly: "They already like you — that's your edge. Be direct and assume the sale: \"I'll get you set up real quick.\" Don't over-explain; warm leads cool off when you ramble.",
-  Interested: "Hot lead. Follow up within 24 hours before the excitement fades, and lead with the exact benefit they reacted to. Speed wins these.",
-  Neutral: "On the fence. Re-open with a sharp, specific value prop or a limited-time hook — give them a reason to act now, not \"someday.\"",
-  Skeptical: "They have doubts. Lead with social proof (\"three of your neighbors just switched\") and a low-commitment next step. Lower the risk, don't push harder.",
-  Hostile: "Low ROI — don't burn energy chasing. A short, polite text leaves the door open without the friction of another knock.",
-  // Interest-level tags (new one-tap chips):
-  Maybe: "On the fence. Re-open with one sharp benefit and a low-pressure next step — a quick demo or a no-commitment quote. Give them a reason to act now.",
-  Unlikely: "Long shot. Don't over-invest — a short, friendly text keeps the door open without burning your energy chasing it.",
-};
-
-const OBJECTIONS = [
-  { q: "I'm happy with my provider", a: "Agree first, then pivot: \"Totally fair — most of my customers were too, until they saw they were overpaying for slower speeds. Mind if I do a 30-second comparison?\"" },
-  { q: "I don't have time right now", a: "\"I hear you — I'll be quick.\" Then get the micro-commitment: their number and a specific callback time. A scheduled no-rush follow-up beats a rushed pitch." },
-  { q: "It's too expensive", a: "Reframe to value and break it to cost-per-day. Anchor against what they pay now (and the bill they'll drop), not against zero." },
-  { q: "I need to ask my spouse", a: "\"Smart — let's get you both in the loop.\" Lock a callback when both are home and leave your brochure so the partner hears it right." },
-  { q: "Just send me the info", a: "Use it: \"Happy to — what's the best number?\" Now it's a stop back. Text your brochure plus a specific follow-up time." },
-];
-
-const MOTIVATION = [
-  "Every no is just data. The yes is closer than it feels.",
-  "You miss 100% of the doors you don't knock.",
-  "Consistency beats intensity. Show up, log it, repeat.",
-  "The sale is in the follow-up. Most reps quit at one touch.",
-  "Your only job at the door: earn the next conversation.",
-];
 
 // Demo friends so the social feed feels alive before cloud sync exists.
 const DEMO_FRIENDS = [
@@ -415,218 +387,69 @@ function attachReact(node, id) {
 }
 
 // ---- Post builders (return an element, or null to skip) --------------
-// A coach message rendered as a chat bubble: avatar, timestamp, and (on first
-// load) a typing shimmer that reveals the text after a short, staggered delay.
-function coachCard(text, idx, animate) {
-  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const node = el(`
-    <article class="post post-coach">
-      <div class="post-head">
-        <span class="avatar avatar-ai">✦</span>
-        <div><span class="post-author">StopBack Coach</span><span class="post-tag">${time}</span></div>
-      </div>
-      <div class="coach-bubble">
-        <div class="typing"><span></span><span></span><span></span></div>
-        <p class="coach-text" hidden>${text}</p>
-      </div>
-    </article>`);
 
-  const reveal = () => {
-    const typing = node.querySelector(".typing");
-    const p = node.querySelector(".coach-text");
-    if (typing) typing.remove();
-    if (p) { p.hidden = false; p.classList.add("reveal"); }
-  };
-
-  if (animate) setTimeout(reveal, 350 + idx * 750);
-  else reveal();
-  return node;
-}
-
-// =====================================================================
-//  PHASE 2 — REAL AI COACH (swap point)
-//  Replace generateCoachMessages() below with an async call to the
-//  Claude API (Anthropic). Send the same context we compute here
-//  ({ profile, goal, todaysStats, streak, stopBackRate, bestCategory,
-//  recentLeads }) as the prompt, and stream the reply into the coach
-//  card — the typing shimmer already models the wait. Keep this
-//  rules-based version as the offline fallback (works with no signal).
-// =====================================================================
-
-// Rotates within a situation's pool by day+hour so wording keeps changing.
-function pick(pool, salt) {
-  const i = (dayNumber() * 24 + new Date().getHours() + hashStr(salt)) % pool.length;
-  return pool[i];
-}
-
-// The best-converting tag (interest/demeanor) among the rep's sales.
-function bestCategoryTag() {
-  const counts = {};
-  state.leads.filter((l) => l.status === "sale").forEach((l) => {
-    const t = l.interest || l.demeanor;
-    if (t) counts[t] = (counts[t] || 0) + 1;
-  });
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  return entries.length ? entries[0][0] : null;
-}
-
-// Returns 1–3 short coach messages, data-driven and rotated.
-function generateCoachMessages() {
-  const name = escapeHtml((state.profile.name || "").split(" ")[0] || "");
-  const hey = name ? name : "champ";
-  const hour = new Date().getHours();
-  const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
-  const goal = state.profile.dailyGoal || 0;
-  const today = localDateStr();
-  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
-  const tSB = todayLeads.length;
-  const tSales = todayLeads.filter((l) => l.status === "sale").length;
-  const tMiss = todayLeads.filter((l) => l.status === "missed").length;
-  const streak = currentStreak();
-  const remaining = Math.max(0, goal - tSB);
-
-  // Stop-back rate → how many doors to line up for the doors-needed nudge.
-  let sbRate = contactsTotal() > 0 ? stopbacksTotal() / contactsTotal() : 0.25;
-  sbRate = Math.min(0.9, Math.max(0.12, sbRate));
-  const doors = remaining > 0 ? Math.ceil(remaining / sbRate) : 0;
-  const ratePct = Math.round(sbRate * 100);
-  const best = bestCategoryTag();
-
-  const messages = [];
-
-  // ---- Pick the primary situation (highest priority first) ----
-  if (state.leads.length === 0) {
-    messages.push(pick([
-      `Fresh start, ${hey}. First move is simple: get one name and one number. That's a stop back — everything builds from there.`,
-      `Blank slate this ${part}. Don't overthink the pitch — knock, be human, get a number. The pipeline starts with one.`,
-      `Zero on the board, ${hey}. Perfect. Go earn your first stop back and I'll help you work it.`,
-    ], "cold"));
-  } else if (tMiss >= 2 && tSales === 0) {
-    messages.push(pick([
-      `Rough patch — ${tMiss} that didn't land. Shake it off, ${hey}. Those aren't losses, they're reps. Next door's clean.`,
-      `${tMiss} misses, no yes yet. That happens to everyone who actually knocks. Reset, breathe, next one.`,
-      `Tough run today. The math still works if you keep swinging — one yes erases the noise.`,
-    ], "rough"));
-  } else if (goal > 0 && tSB >= goal * 1.5) {
-    messages.push(pick([
-      `${tSB} stop backs?! You're on fire, ${hey}. Days like this are where months get made — ride it.`,
-      `Way past goal and still moving. This is record pace. Don't let up now.`,
-      `You're cooking this ${part}. ${tSB} on the board — keep the foot down.`,
-    ], "crush"));
-  } else if (goal > 0 && tSB >= goal) {
-    messages.push(pick([
-      `Goal hit — ${tSB} stop backs. 🔥 Everything from here is bonus. How many extra you got in you?`,
-      `That's your number, ${hey}. Most reps coast now; the great ones keep knocking while they're hot.`,
-      `${tSB}/${goal} — done. Bank it, then steal a few more before you call it.`,
-    ], "hit"));
-  } else if (goal > 0 && remaining <= 2 && tSB > 0) {
-    messages.push(pick([
-      `So close — ${remaining} more and the goal's yours. Don't coast now, ${hey}.`,
-      `${remaining} away. This is where good reps finish. Two more doors.`,
-      `Almost there: ${remaining} to go. Line up the next couple and close it out.`,
-    ], "near"));
-  } else if (goal > 0 && tSB > 0) {
-    messages.push(pick([
-      `${remaining} more to hit goal. You get a number at ~${ratePct}% of doors, so line up about ${doors}. Go.`,
-      `You're at ${tSB}/${goal}, ${hey}. Not behind — just not done. ~${doors} more doors gets you there.`,
-      `${remaining} to go. At your ~${ratePct}% rate that's roughly ${doors} knocks. Tighten the pitch and grind them out.`,
-    ], "behind"));
-  } else {
-    // No stop backs yet today (has history)
-    messages.push(pick([
-      `${part === "morning" ? "Morning" : "Fresh"} reset, ${hey}. ${streak > 0 ? `${streak}-day streak says you know the drill.` : "You've done this before."} Go get today's first number.`,
-      `Nothing logged yet today. First door's the hardest — knock it and the rest follow.`,
-      `Clean slate for today. Line up your first few and let momentum do the work.`,
-    ], "fresh"));
-  }
-
-  // ---- Secondary: your money pattern (if there's a clear one) ----
-  if (best) {
-    messages.push(pick([
-      `Pattern I'm seeing: your sales cluster in your "${best}" leads. Re-touch those first — that's where your money is.`,
-      `Your "${best}" leads convert best for you. Prioritize them today over cold ones.`,
-    ], "best" + best));
-  }
-
-  // ---- Third: streak protect, or a quick objection rep ----
-  if (streak >= 3) {
-    messages.push(pick([
-      `${streak} days straight. Consistency is the real edge here — protect the streak today.`,
-      `Don't break the chain: ${streak} days and counting. One log keeps it alive.`,
-    ], "streak"));
-  } else {
-    const obj = OBJECTIONS[dayNumber() % OBJECTIONS.length];
-    messages.push(`Quick rep — when they say "${obj.q}": ${obj.a}`);
-  }
-
-  return messages.slice(0, 3);
-}
-
-function callbacksPost() {
-  const due = dueCallbacks();
-  if (!due.length) return null;
-  const today = localDateStr();
-  const node = el(`
-    <article class="post">
-      <div class="post-head">
-        <span class="avatar" style="background:var(--red)">📞</span>
-        <div><span class="post-author">Callbacks Due</span><span class="post-tag">Don't let these slip</span></div>
-      </div>
-      <div class="cb-rows"></div>
-    </article>`);
-  const rows = node.querySelector(".cb-rows");
-  due.forEach((l) => {
-    const digits = phoneDigits(l.phone);
-    const label = (callbackOverdue(l.callbackAt) ? "Overdue · " : "") + formatCallback(l.callbackAt);
-    const row = el(`
-      <div class="hit">
-        <span class="hit-rank" style="background:var(--red)">!</span>
-        <div class="hit-info">
-          <div class="hit-name">${escapeHtml(l.name)}</div>
-          <div class="hit-method" style="color:var(--red)">${label}${l.address ? " · " + escapeHtml(l.address) : ""}</div>
-        </div>
-        <div class="hit-actions">
-          <a href="tel:${digits}">Call</a>
-          <a href="sms:${digits}">Text</a>
-          <button class="cb-done" type="button">Done</button>
-        </div>
-      </div>`);
-    row.querySelector(".cb-done").onclick = () => {
-      l.callbackAt = "";
-      render();
-      dbUpdateLead(l.id, { callback_at: "" }).catch(dbFail("Couldn't update callback"));
-    };
-    rows.appendChild(row);
-  });
-  return node;
-}
-
+// THE feature card of the feed: who to hit today. Scheduled callbacks that
+// are due today / overdue are pinned on top (soonest first, time shown);
+// rotating picks fill the remaining slots up to 5. No selling advice —
+// just people and the action.
 function hitListPost() {
-  const hits = dailyHitList();
-  if (!hits.length) return null;
+  const due = dueCallbacks();
+  const dueIds = new Set(due.map((l) => l.id));
+  const picks = dailyHitList().filter((h) => !dueIds.has(h.lead.id));
+
+  const rows = due.map((l) => ({
+    lead: l,
+    label: (callbackOverdue(l.callbackAt) ? "Overdue — " : "Scheduled — ") + formatCallback(l.callbackAt),
+    isCallback: true,
+    overdue: callbackOverdue(l.callbackAt),
+  }));
+  picks.forEach((h) => {
+    if (rows.length < 5) rows.push({ lead: h.lead, label: h.method, isCallback: false });
+  });
+
   const node = el(`
-    <article class="post">
+    <article class="post post-hitlist">
       <div class="post-head">
-        <span class="avatar avatar-ai">🎯</span>
-        <div><span class="post-author">Today's Hit List</span><span class="post-tag">Smart picks · rotates daily</span></div>
+        <span class="avatar avatar-ai big">🎯</span>
+        <div>
+          <span class="post-author hl-heading">Today's Hit List</span>
+          <span class="post-tag">Who to text, call, or stop back today</span>
+        </div>
       </div>
       <div class="hl-rows"></div>
+      <p class="empty-hint" hidden>No one to chase yet — get a number and they'll show up here. 🚪</p>
     </article>`);
-  const rows = node.querySelector(".hl-rows");
-  hits.forEach((h, i) => {
-    const digits = phoneDigits(h.lead.phone);
-    rows.appendChild(el(`
+
+  const rowsEl = node.querySelector(".hl-rows");
+  if (!rows.length) {
+    node.querySelector(".empty-hint").hidden = false;
+    return node;
+  }
+
+  rows.forEach((r, i) => {
+    const digits = phoneDigits(r.lead.phone);
+    const icon = r.isCallback ? "📞" : r.label === "Text" ? "📱" : r.label === "Call" ? "📞" : "🚪";
+    const row = el(`
       <div class="hit">
-        <span class="hit-rank">${i + 1}</span>
+        <span class="hit-rank${r.isCallback ? " urgent" : ""}">${i + 1}</span>
         <div class="hit-info">
-          <div class="hit-name">${escapeHtml(h.lead.name)}</div>
-          <div class="hit-method">Today: ${h.method}${h.lead.address ? " · " + escapeHtml(h.lead.address) : ""}</div>
+          <div class="hit-name">${escapeHtml(r.lead.name)}</div>
+          <div class="hit-method${r.overdue ? " due" : ""}">${icon} ${escapeHtml(r.label)}${r.lead.address ? " · " + escapeHtml(r.lead.address) : ""}</div>
         </div>
         <div class="hit-actions">
           <a href="tel:${digits}">Call</a>
           <a href="sms:${digits}">Text</a>
+          ${r.isCallback ? '<button class="cb-done" type="button">Done</button>' : ""}
         </div>
-      </div>`));
+      </div>`);
+    const done = row.querySelector(".cb-done");
+    if (done)
+      done.onclick = () => {
+        r.lead.callbackAt = "";
+        render();
+        dbUpdateLead(r.lead.id, { callback_at: "" }).catch(dbFail("Couldn't update callback"));
+      };
+    rowsEl.appendChild(row);
   });
   return node;
 }
@@ -696,18 +519,6 @@ function weeklyRecapPost() {
         <div class="recap"><span class="recap-num green">${sales}</span><span class="recap-label">Sales</span></div>
         <div class="recap"><span class="recap-num red">${missed}</span><span class="recap-label">Missed</span></div>
       </div>
-    </article>`);
-}
-
-function motivationPost() {
-  const quote = MOTIVATION[dayNumber() % MOTIVATION.length];
-  return el(`
-    <article class="post post-coach">
-      <div class="post-head">
-        <span class="avatar avatar-ai">✦</span>
-        <div><span class="post-author">StopBack Coach</span><span class="post-tag">Daily fuel</span></div>
-      </div>
-      <p class="post-body" style="font-size:1.05rem;font-family:var(--font-display);">"${quote}"</p>
     </article>`);
 }
 
@@ -821,20 +632,16 @@ function renderFeed() {
   const stream = document.getElementById("feed-stream");
   stream.innerHTML = "";
 
-  const coach = generateCoachMessages().map((m, i) => coachCard(m, i, animate));
   const friends = friendPosts();
   const highlights = yourHighlightPosts();
 
-  // Actionable stuff first, then an interleaved social mix.
+  // Hit list is the point of the feed — it leads. Social mix after.
   const posts = [
     streakRiskPost(),
     goalPost(animate),
-    callbacksPost(),
-    coach[0],
     hitListPost(),
-    ...interleave(highlights, friends, coach.slice(1)),
+    ...interleave(highlights, friends),
     weeklyRecapPost(),
-    motivationPost(),
   ].filter(Boolean);
 
   posts.forEach((p, i) => {
