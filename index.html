@@ -14,12 +14,58 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="app-header">
+  <!-- ===================== AUTH SCREEN ===================== -->
+  <div class="auth-screen" id="auth-screen" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">Stop<span class="dot">·</span>Back</div>
+      <p class="auth-tag">Your door-to-door sales sidekick.</p>
+      <form id="auth-form" class="auth-form">
+        <label>Email
+          <input type="email" id="auth-email" autocomplete="email" required />
+        </label>
+        <label>Password
+          <input type="password" id="auth-password" autocomplete="current-password" minlength="6" required />
+        </label>
+        <p class="auth-error" id="auth-error" hidden></p>
+        <button class="primary" type="submit" id="auth-submit">Sign in</button>
+      </form>
+      <p class="auth-toggle">
+        <span id="auth-toggle-text">New here?</span>
+        <button type="button" class="linkish" id="auth-toggle-btn">Create an account</button>
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== ONBOARDING SCREEN ===================== -->
+  <div class="auth-screen" id="onboarding-screen" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">Welcome 👋</div>
+      <p class="auth-tag">Set up your rep profile.</p>
+      <form id="onboarding-form" class="auth-form">
+        <label>Username <span class="auth-hint">friends find you by this</span>
+          <input type="text" id="ob-username" pattern="[A-Za-z0-9_]{3,20}" placeholder="willk" required />
+        </label>
+        <label>Your name
+          <input type="text" id="ob-name" placeholder="Will Keeler" required />
+        </label>
+        <label>Daily stop-back goal
+          <input type="number" id="ob-goal" min="1" value="5" required />
+        </label>
+        <label>Daily sales goal
+          <input type="number" id="ob-sales-goal" min="1" value="2" required />
+        </label>
+        <p class="auth-error" id="ob-error" hidden></p>
+        <button class="primary" type="submit">Start selling</button>
+      </form>
+    </div>
+  </div>
+
+  <header class="app-header" hidden>
     <span class="wordmark">Stop<span class="dot">·</span>Back</span>
     <span class="header-date" id="today-label"></span>
   </header>
 
-  <main class="container">
+  <main class="container" hidden>
 
     <!-- ===================== FEED (FOR YOU) VIEW ===================== -->
     <section class="view" id="view-feed">
@@ -112,8 +158,8 @@
           <button type="button" class="chip unlikely" data-interest="Unlikely">Unlikely</button>
         </div>
 
-        <label>Call back on (optional)
-          <input type="date" id="f-callback" />
+        <label>When to come back? (optional)
+          <input type="datetime-local" id="f-callback" />
         </label>
         <button type="submit" class="primary">Save Stop Back</button>
       </form>
@@ -222,6 +268,9 @@
         <label>Daily stop-back goal
           <input type="number" id="p-goal" min="1" placeholder="5" />
         </label>
+        <label>Daily sales goal
+          <input type="number" id="p-sales-goal" min="1" placeholder="2" />
+        </label>
       </div>
 
       <div class="card form">
@@ -250,6 +299,23 @@
       </div>
 
       <div class="card">
+        <h2 class="card-title">Sharing with friends</h2>
+        <p class="muted small">Nothing is shared until a friend request is accepted.</p>
+        <label class="toggle-row">
+          <span><strong>Stats &amp; milestones</strong><br /><span class="muted small">Streak, stop-backs, and sales on their feed + leaderboard</span></span>
+          <input type="checkbox" id="pv-stats" />
+        </label>
+        <label class="toggle-row">
+          <span><strong>My stop-back list</strong><br /><span class="muted small">Let friends view your leads (names &amp; notes)</span></span>
+          <input type="checkbox" id="pv-leads" />
+        </label>
+        <label class="toggle-row">
+          <span><strong>Phone numbers</strong><br /><span class="muted small">Include phone numbers in your shared list</span></span>
+          <input type="checkbox" id="pv-phone" />
+        </label>
+      </div>
+
+      <div class="card">
         <h2 class="card-title">Products &amp; Brochure</h2>
         <p class="muted small">Manage the products you sell. (Printable brochure comes next.)</p>
         <button class="ghost" id="open-products" type="button">Manage Products →</button>
@@ -265,27 +331,40 @@
         </div>
         <button class="ghost full" id="export-csv" type="button">Export leads to CSV (opens in Excel)</button>
       </div>
+
+      <div class="card">
+        <h2 class="card-title">Account</h2>
+        <p class="muted small" id="account-email">—</p>
+        <button class="ghost full" id="logout-btn" type="button">Sign out</button>
+      </div>
     </section>
 
     <!-- ===================== FRIENDS VIEW ===================== -->
     <section class="view" id="view-friends" hidden>
       <button class="back-link" id="friends-back" type="button">← Profile</button>
       <h1 class="view-title">Friends</h1>
-      <p class="view-sub">Share highlights with your crew.</p>
+      <p class="view-sub">Find your crew and share your grind.</p>
 
-      <form class="card form" id="friend-form">
-        <h2 class="card-title">Add a Friend</h2>
-        <label>Name
-          <input type="text" id="fr-name" placeholder="e.g. Marcus T." required />
-        </label>
-        <button type="submit" class="primary">Add Friend</button>
-      </form>
+      <div class="card">
+        <h2 class="card-title">Add a friend</h2>
+        <form id="friend-search-form">
+          <label>Search by username or email
+            <input type="text" id="friend-search" placeholder="willk  or  will@email.com" autocomplete="off" />
+          </label>
+        </form>
+        <div id="search-results"></div>
+      </div>
 
-      <p class="muted small" id="friends-note">
-        Their highlights are sample data for now — live sharing of real stats arrives with cloud accounts.
-      </p>
-      <ul class="friends" id="friends-list"></ul>
-      <p class="empty-hint" id="friends-empty">No friends added yet. (Two demo friends already appear in your feed.)</p>
+      <div class="card" id="requests-card" hidden>
+        <h2 class="card-title">Requests</h2>
+        <ul class="friends" id="requests-list"></ul>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Your friends</h2>
+        <ul class="friends" id="friends-list"></ul>
+        <p class="empty-hint" id="friends-empty">No friends yet. Search above to send a request.</p>
+      </div>
     </section>
 
     <!-- ===================== PRODUCTS VIEW ===================== -->
@@ -336,7 +415,7 @@
           </select>
         </label>
         <label>Notes <textarea id="e-notes" rows="2"></textarea></label>
-        <label>Call back on <input type="date" id="e-callback" /></label>
+        <label>When to come back? <input type="datetime-local" id="e-callback" /></label>
         <div class="modal-actions">
           <button type="button" class="ghost" id="edit-cancel">Cancel</button>
           <button type="submit" class="primary">Save</button>
@@ -346,7 +425,7 @@
   </div>
 
   <!-- ===================== BOTTOM NAV ===================== -->
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" hidden>
     <button class="nav-btn active" data-view="feed">
       <span class="bubble">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15.6l-1.7-4.6L6 9.3l4.3-1.7z"/><path d="M18.5 14l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>
@@ -383,6 +462,12 @@
     </button>
   </nav>
 
+  <!-- Supabase client + auth (Phase 2). config.js holds your keys (gitignored). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="auth.js"></script>
+  <script src="db.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

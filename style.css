@@ -284,6 +284,21 @@ h1, h2, h3, .wordmark, .view-title, .card-title, .streak-num,
 /* Hit-list rows inside a post sit flush */
 .post .hit:first-of-type { padding-top: 0.3rem; }
 
+/* ===== Featured Hit List — the biggest card on the feed ===== */
+.post-hitlist { border: 2px solid var(--green); }
+.post-hitlist .hl-heading {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+.avatar.big { width: 46px; height: 46px; font-size: 1.25rem; }
+.post-hitlist .hit { padding: var(--sp-3) 0; }
+.post-hitlist .hit-name { font-size: 1.08rem; }
+.post-hitlist .hit-method { font-size: 0.88rem; }
+.hit-rank.urgent { background: var(--red); }
+.hit-method.due { color: var(--red); font-weight: 700; }
+
 /* ===== Friends management ===== */
 .friends { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; }
 .friend-item {
@@ -299,7 +314,15 @@ h1, h2, h3, .wordmark, .view-title, .card-title, .streak-num,
   padding: 0.35rem 0.6rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
 }
 .friend-item .frdel:hover { border-color: var(--red); color: var(--red); }
-#friends-note { margin-bottom: 0.8rem; }
+.friend-item .fr-actions { display: flex; gap: var(--sp-2); flex-shrink: 0; }
+.friend-item .fr-accept {
+  background: var(--green); color: var(--paper);
+  border: none; border-radius: 8px; padding: 0.4rem 0.75rem;
+  font-size: 0.8rem; font-weight: 700; cursor: pointer; flex-shrink: 0;
+}
+.friend-item .fr-accept:hover { background: var(--green-deep); }
+.friend-item .fr-accept:disabled { background: var(--paper-3); color: var(--ink-soft); cursor: default; }
+#search-results { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); }
 
 /* ===== Colored numbers ===== */
 .green { color: var(--green); }
@@ -421,6 +444,18 @@ button.ghost:active { transform: translateY(1px); }
 }
 .lead.status-sale { border-left-color: var(--green-deep); }
 .lead.status-missed { border-left-color: var(--red); }
+.lead { position: relative; }
+.lead .lead-name { padding-right: 48px; } /* keep clear of the pencil */
+.lead-edit {
+  position: absolute; top: var(--sp-2); right: var(--sp-2);
+  width: 40px; height: 40px;               /* comfortable tap target */
+  display: grid; place-items: center;
+  background: transparent; border: 1px solid transparent; border-radius: 10px;
+  color: var(--ink-soft); cursor: pointer;
+}
+.lead-edit svg { width: 18px; height: 18px; }
+.lead-edit:hover { background: var(--paper); border-color: var(--line); color: var(--green-deep); }
+.lead-edit:active { transform: scale(0.94); }
 .lead-name { font-weight: 800; font-size: 1.05rem; font-family: var(--font-display); }
 .lead-phone { color: var(--ink-soft); font-size: 0.9rem; }
 .lead-addr { color: var(--ink-soft); font-size: 0.85rem; margin-top: 0.15rem; }
@@ -648,10 +683,17 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .product-actions button:hover { border-color: var(--green); }
 .product-actions .pdel:hover { border-color: var(--red); color: var(--red); }
 
-/* ===== Goal progress ring (Feed) ===== */
-.post-goal { display: flex; align-items: center; gap: 1rem; }
-.goal-ring { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
-.goal-ring svg { width: 80px; height: 80px; transform: rotate(-90deg); }
+/* ===== Goal progress rings (Feed) ===== */
+.post-goal { display: flex; align-items: center; gap: var(--sp-4); }
+.goal-cols { display: flex; gap: var(--sp-4); flex-shrink: 0; }
+.goal-col { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.goal-label {
+  font-size: 0.68rem; color: var(--ink-soft); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ring-fg.sales { stroke: var(--amber); }
+.goal-ring { position: relative; width: 72px; height: 72px; flex-shrink: 0; }
+.goal-ring svg { width: 72px; height: 72px; transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: var(--paper-3); stroke-width: 8; }
 .ring-fg { fill: none; stroke: var(--green); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.5s ease; }
 .ring-fg.done { stroke: var(--green-deep); }
@@ -750,3 +792,59 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
     border-radius: var(--radius) var(--radius) 0 0;
     border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 }
+
+/* ===== Sharing toggles (Phase 3) ===== */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) 0; border-bottom: 1px solid var(--line);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row input[type="checkbox"] {
+  width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--green); cursor: pointer;
+}
+
+/* ===== Auth + onboarding screens (Phase 2) ===== */
+/* These elements set their own display, so the hidden attribute needs help. */
+.app-header[hidden], .bottom-nav[hidden], .auth-screen[hidden] { display: none; }
+
+.auth-screen {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-5);
+  background: var(--paper);
+  overflow: auto;
+}
+.auth-card {
+  width: 100%; max-width: 380px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--sp-5);
+  text-align: center;
+}
+.auth-brand {
+  font-family: var(--font-display);
+  font-size: 1.9rem; font-weight: 900; letter-spacing: -0.02em;
+}
+.auth-brand .dot { color: var(--green); }
+.auth-tag { color: var(--ink-soft); font-size: var(--fs-sub); margin: var(--sp-1) 0 var(--sp-5); }
+.auth-form { display: flex; flex-direction: column; text-align: left; }
+.auth-form label {
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  font-size: var(--fs-caption); font-weight: 600; color: var(--ink-soft);
+  margin-bottom: var(--sp-3);
+}
+.auth-form .auth-hint { font-weight: 500; opacity: 0.8; }
+.auth-form button.primary { margin-top: var(--sp-2); }
+.auth-error {
+  color: var(--red); font-size: var(--fs-sub); font-weight: 600;
+  margin-bottom: var(--sp-2); text-align: left;
+}
+.auth-toggle { margin-top: var(--sp-4); font-size: var(--fs-sub); color: var(--ink-soft); }
+.linkish {
+  background: none; border: none; cursor: pointer;
+  color: var(--green-deep); font-weight: 700; font-size: var(--fs-sub);
+  text-decoration: underline; padding: 0;
+}
+.linkish:hover { color: var(--green); }

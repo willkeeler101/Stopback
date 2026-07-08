@@ -11,7 +11,7 @@ const DEFAULT_STATE = {
   contactsTally: 0,        // people talked to without getting a number
   leads: [],               // full stop-back records
   activeDays: [],          // "YYYY-MM-DD" strings — used for streaks
-  profile: { name: "", dailyGoal: 5 },
+  profile: { name: "", dailyGoal: 5, salesGoal: 2 },
   // Historical totals from before using the app — added on top of live data.
   baseline: { contacts: 0, stopbacks: 0, missed: 0, sales: 0 },
   products: [],            // things you sell (for the brochure)
@@ -19,6 +19,8 @@ const DEFAULT_STATE = {
   likes: {},               // which feed posts you've reacted to
   // Motivation layer (XP is derived; this tracks celebrations + earned badges).
   gamify: { badges: {}, goalHitDate: "", lastStreakCelebrated: 0, streakSeen: 0 },
+  // What accepted friends are allowed to see (Phase 3).
+  privacy: { shareStats: true, shareLeads: false, sharePhone: false },
 };
 
 let editingProductId = null; // null = the product form is in "add" mode
@@ -41,9 +43,25 @@ function load() {
   }
 }
 
+// Phase 2: Supabase is the source of truth. save() now only writes a local
+// CACHE (under a different key) so we never clobber the pre-migration data in
+// STORAGE_KEY, which the one-time importer still needs. Likes are cached too.
 function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem("stopback-cache-v1", JSON.stringify(state));
+    localStorage.setItem("stopback-likes", JSON.stringify(state.likes || {}));
+  } catch (_) {}
 }
+
+// Debounce helper for chatty inputs (name/goal/baseline typing).
+function debounce(fn, ms = 500) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+const saveProfileDebounced = debounce(
+  (patch) => dbSaveProfile(patch).catch(dbFail("Couldn't save profile")),
+  500
+);
 
 // ---- Date helpers ----------------------------------------------------
 function localDateStr(d = new Date()) {
@@ -56,7 +74,12 @@ function localDateStr(d = new Date()) {
 // Record that the user did something today (drives the streak).
 function markActiveToday() {
   const today = localDateStr();
-  if (!state.activeDays.includes(today)) state.activeDays.push(today);
+  if (!state.activeDays.includes(today)) {
+    state.activeDays.push(today);
+    if (window.dbSaveProfile)
+      dbSaveProfile({ active_days: state.activeDays, current_streak: currentStreak() })
+        .catch(dbFail("Couldn't save streak"));
+  }
 }
 
 function currentStreak() {
@@ -169,6 +192,8 @@ function initGamify() {
   const goal = state.profile.dailyGoal || 0;
   if (goal > 0 && stopbacksToday() >= goal) state.gamify.goalHitDate = today;
   save();
+  if (window.dbSaveProfile)
+    dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
 }
 
 // Called AFTER a user action. Detects new milestones and celebrates once each.
@@ -200,6 +225,8 @@ function runGamification(opts = {}) {
   });
 
   save();
+  if (window.dbSaveProfile)
+    dbSaveProfile({ gamify: state.gamify }).catch(dbFail("Couldn't save progress"));
   if (party || newBadges.length) confettiBurst();
   newBadges.forEach((b, i) => setTimeout(() => toast(`Badge earned: ${b.name} ${b.icon}`), 700 + i * 900));
 }
@@ -263,6 +290,28 @@ function formatDateShort(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+// ---- Callback date+time helpers ---------------------------------------
+// State stores callbackAt as a full ISO (UTC) string; the datetime-local
+// input wants a local "YYYY-MM-DDTHH:MM" string. Convert between the two.
+function toLocalInputValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+// "Today 6:00 PM" for today's callbacks, "Jul 10 6:00 PM" otherwise.
+function formatCallback(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (localDateStr(d) === localDateStr()) return "Today " + time;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + time;
+}
+// A callback is overdue once its exact time has passed.
+function callbackOverdue(iso) {
+  return !!iso && new Date(iso).getTime() < Date.now();
+}
 // Simple deterministic hash so the daily hit list rotates predictably.
 function hashStr(str) {
   str = String(str);
@@ -274,9 +323,9 @@ function hashStr(str) {
 // =====================================================================
 //  FEED
 // =====================================================================
-const METHODS = ["Text", "Call", "Knock in person"];
+const METHODS = ["Text", "Call", "Stop back in person"];
 
-// Pick up to 3 stop-backs to chase today; rotates day to day.
+// Pick up to 5 stop-backs to chase today; rotates day to day.
 function dailyHitList() {
   const day = localDateStr();
   const dayIndex = Math.floor(Date.now() / 86400000);
@@ -285,54 +334,95 @@ function dailyHitList() {
   return candidates
     .map((l) => ({ lead: l, score: hashStr(l.id + day) }))
     .sort((a, b) => a.score - b.score)
-    .slice(0, 3)
+    .slice(0, 5)
     .map((item, i) => ({
       lead: item.lead,
       method: METHODS[(dayIndex + i) % METHODS.length],
     }));
 }
 
-// ---- Coaching content -------------------------------------------------
-const APPROACH = {
-  Friendly: "They already like you — that's your edge. Be direct and assume the sale: \"I'll get you set up real quick.\" Don't over-explain; warm leads cool off when you ramble.",
-  Interested: "Hot lead. Follow up within 24 hours before the excitement fades, and lead with the exact benefit they reacted to. Speed wins these.",
-  Neutral: "On the fence. Re-open with a sharp, specific value prop or a limited-time hook — give them a reason to act now, not \"someday.\"",
-  Skeptical: "They have doubts. Lead with social proof (\"three of your neighbors just switched\") and a low-commitment next step. Lower the risk, don't push harder.",
-  Hostile: "Low ROI — don't burn energy chasing. A short, polite text leaves the door open without the friction of another knock.",
-  // Interest-level tags (new one-tap chips):
-  Maybe: "On the fence. Re-open with one sharp benefit and a low-pressure next step — a quick demo or a no-commitment quote. Give them a reason to act now.",
-  Unlikely: "Long shot. Don't over-invest — a short, friendly text keeps the door open without burning your energy chasing it.",
-};
-
-const OBJECTIONS = [
-  { q: "I'm happy with my provider", a: "Agree first, then pivot: \"Totally fair — most of my customers were too, until they saw they were overpaying for slower speeds. Mind if I do a 30-second comparison?\"" },
-  { q: "I don't have time right now", a: "\"I hear you — I'll be quick.\" Then get the micro-commitment: their number and a specific callback time. A scheduled no-rush follow-up beats a rushed pitch." },
-  { q: "It's too expensive", a: "Reframe to value and break it to cost-per-day. Anchor against what they pay now (and the bill they'll drop), not against zero." },
-  { q: "I need to ask my spouse", a: "\"Smart — let's get you both in the loop.\" Lock a callback when both are home and leave your brochure so the partner hears it right." },
-  { q: "Just send me the info", a: "Use it: \"Happy to — what's the best number?\" Now it's a stop back. Text your brochure plus a specific follow-up time." },
-];
-
-const MOTIVATION = [
-  "Every no is just data. The yes is closer than it feels.",
-  "You miss 100% of the doors you don't knock.",
-  "Consistency beats intensity. Show up, log it, repeat.",
-  "The sale is in the follow-up. Most reps quit at one touch.",
-  "Your only job at the door: earn the next conversation.",
-];
-
-// Demo friends so the social feed feels alive before cloud sync exists.
-const DEMO_FRIENDS = [
-  { id: "demo-marcus", name: "Marcus T." },
-  { id: "demo-sasha", name: "Sasha R." },
-];
-const FRIEND_HIGHLIGHTS = [
-  (n) => ({ text: `💰 Closed ${n} sales today`, tone: "" }),
-  (n) => ({ text: `🔥 ${n}-day knock streak`, tone: "ink" }),
-  (n) => ({ text: `📈 New record: ${n} stop backs`, tone: "" }),
-  (n) => ({ text: `💪 Hit ${n * 15}% of the weekly goal`, tone: "ink" }),
-];
-
 const dayNumber = () => Math.floor(Date.now() / 86400000);
+
+// =====================================================================
+//  ACHIEVEMENTS — computed from real data (you + accepted friends)
+//  via get_friends_overview(). No sample data.
+// =====================================================================
+const SALES_WEEK_TIERS = [20, 15, 10, 5, 3]; // weekly sales milestones
+const SB_DAY_TIERS = [20, 15, 10, 5];        // stop backs in one day
+
+// Consecutive days (ending today or yesterday) with at least one sale.
+function salesStreakFrom(saleDays) {
+  const set = new Set((saleDays || []).map((d) => String(d).slice(0, 10)));
+  if (!set.size) return 0;
+  const d = new Date();
+  if (!set.has(localDateStr(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (set.has(localDateStr(d))) {
+    n++;
+    d.setDate(d.getDate() - 1);
+  }
+  return n;
+}
+
+// Two sales within 60 minutes today. Uses real sold_at timestamps, so
+// older sales without one simply don't count.
+function twoSalesInHour(times) {
+  const t = (times || []).map((x) => new Date(x).getTime()).sort((a, b) => a - b);
+  for (let i = 1; i < t.length; i++) if (t[i] - t[i - 1] <= 3600000) return true;
+  return false;
+}
+
+// Highest tier a value has reached (tiers listed high→low), or 0.
+function tierReached(value, tiers) {
+  for (const t of tiers) if (value >= t) return t;
+  return 0;
+}
+
+// Everything one person has earned right now. ids are stable per person +
+// milestone + day/week so reaction counts stay consistent.
+function achievementsFor(row) {
+  const out = [];
+  const day = localDateStr();
+  const week = "w" + Math.floor(dayNumber() / 7);
+  const uid = row.user_id;
+
+  if (twoSalesInHour(row.sale_times_today))
+    out.push({ id: `hot-${uid}-${day}`, banner: "⚡ 2 sales in one hour", tone: "ink" });
+
+  const salesStreak = salesStreakFrom(row.sale_days);
+  if (salesStreak >= 2)
+    out.push({ id: `sstreak-${uid}-${salesStreak}`, banner: `💰 ${salesStreak}-day sales streak`, tone: "" });
+
+  const wkTier = tierReached(row.sales_week, SALES_WEEK_TIERS);
+  if (wkTier)
+    out.push({ id: `wk-${uid}-${wkTier}-${week}`, banner: `🏆 ${row.sales_week} sales this week`, tone: "ink" });
+
+  const sbTier = tierReached(row.stopbacks_today, SB_DAY_TIERS);
+  if (sbTier)
+    out.push({ id: `sbd-${uid}-${sbTier}-${day}`, banner: `🚪 ${row.stopbacks_today} stop backs today`, tone: "" });
+
+  if (row.current_streak >= 2)
+    out.push({ id: `login-${uid}-${row.current_streak}`, banner: `🔥 ${row.current_streak}-day streak`, tone: "" });
+
+  return out;
+}
+
+// One achievement rendered as a feed card (same style for you + friends).
+function achievementPost(row, a) {
+  const who = row.is_self ? state.profile.name || "You" : row.display_name || "@" + row.username;
+  const tag = row.is_self ? "Your highlight" : `@${row.username} · friend`;
+  const node = el(`
+    <article class="post ${row.is_self ? "post-highlight" : "post-friend"}">
+      <div class="post-head">
+        <span class="avatar ${row.is_self ? "avatar-you" : ""}"${row.is_self ? "" : ' style="background:var(--green-deep)"'}>${initials(who)}</span>
+        <div><span class="post-author">${escapeHtml(who)}</span><span class="post-tag">${escapeHtml(tag)}</span></div>
+      </div>
+      <div class="highlight-banner ${a.tone}">${a.banner}</div>
+      <div class="post-foot"><button class="react" type="button">🔥 <span>0</span></button></div>
+    </article>`);
+  attachReact(node, a.id);
+  return node;
+}
 
 // ---- Tiny DOM + like helpers -----------------------------------------
 function el(html) {
@@ -366,265 +456,71 @@ function attachReact(node, id) {
 }
 
 // ---- Post builders (return an element, or null to skip) --------------
-// A coach message rendered as a chat bubble: avatar, timestamp, and (on first
-// load) a typing shimmer that reveals the text after a short, staggered delay.
-function coachCard(text, idx, animate) {
-  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const node = el(`
-    <article class="post post-coach">
-      <div class="post-head">
-        <span class="avatar avatar-ai">✦</span>
-        <div><span class="post-author">StopBack Coach</span><span class="post-tag">${time}</span></div>
-      </div>
-      <div class="coach-bubble">
-        <div class="typing"><span></span><span></span><span></span></div>
-        <p class="coach-text" hidden>${text}</p>
-      </div>
-    </article>`);
 
-  const reveal = () => {
-    const typing = node.querySelector(".typing");
-    const p = node.querySelector(".coach-text");
-    if (typing) typing.remove();
-    if (p) { p.hidden = false; p.classList.add("reveal"); }
-  };
-
-  if (animate) setTimeout(reveal, 350 + idx * 750);
-  else reveal();
-  return node;
-}
-
-// =====================================================================
-//  PHASE 2 — REAL AI COACH (swap point)
-//  Replace generateCoachMessages() below with an async call to the
-//  Claude API (Anthropic). Send the same context we compute here
-//  ({ profile, goal, todaysStats, streak, stopBackRate, bestCategory,
-//  recentLeads }) as the prompt, and stream the reply into the coach
-//  card — the typing shimmer already models the wait. Keep this
-//  rules-based version as the offline fallback (works with no signal).
-// =====================================================================
-
-// Rotates within a situation's pool by day+hour so wording keeps changing.
-function pick(pool, salt) {
-  const i = (dayNumber() * 24 + new Date().getHours() + hashStr(salt)) % pool.length;
-  return pool[i];
-}
-
-// The best-converting tag (interest/demeanor) among the rep's sales.
-function bestCategoryTag() {
-  const counts = {};
-  state.leads.filter((l) => l.status === "sale").forEach((l) => {
-    const t = l.interest || l.demeanor;
-    if (t) counts[t] = (counts[t] || 0) + 1;
-  });
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  return entries.length ? entries[0][0] : null;
-}
-
-// Returns 1–3 short coach messages, data-driven and rotated.
-function generateCoachMessages() {
-  const name = escapeHtml((state.profile.name || "").split(" ")[0] || "");
-  const hey = name ? name : "champ";
-  const hour = new Date().getHours();
-  const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
-  const goal = state.profile.dailyGoal || 0;
-  const today = localDateStr();
-  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
-  const tSB = todayLeads.length;
-  const tSales = todayLeads.filter((l) => l.status === "sale").length;
-  const tMiss = todayLeads.filter((l) => l.status === "missed").length;
-  const streak = currentStreak();
-  const remaining = Math.max(0, goal - tSB);
-
-  // Stop-back rate → how many doors to line up for the doors-needed nudge.
-  let sbRate = contactsTotal() > 0 ? stopbacksTotal() / contactsTotal() : 0.25;
-  sbRate = Math.min(0.9, Math.max(0.12, sbRate));
-  const doors = remaining > 0 ? Math.ceil(remaining / sbRate) : 0;
-  const ratePct = Math.round(sbRate * 100);
-  const best = bestCategoryTag();
-
-  const messages = [];
-
-  // ---- Pick the primary situation (highest priority first) ----
-  if (state.leads.length === 0) {
-    messages.push(pick([
-      `Fresh start, ${hey}. First move is simple: get one name and one number. That's a stop back — everything builds from there.`,
-      `Blank slate this ${part}. Don't overthink the pitch — knock, be human, get a number. The pipeline starts with one.`,
-      `Zero on the board, ${hey}. Perfect. Go earn your first stop back and I'll help you work it.`,
-    ], "cold"));
-  } else if (tMiss >= 2 && tSales === 0) {
-    messages.push(pick([
-      `Rough patch — ${tMiss} that didn't land. Shake it off, ${hey}. Those aren't losses, they're reps. Next door's clean.`,
-      `${tMiss} misses, no yes yet. That happens to everyone who actually knocks. Reset, breathe, next one.`,
-      `Tough run today. The math still works if you keep swinging — one yes erases the noise.`,
-    ], "rough"));
-  } else if (goal > 0 && tSB >= goal * 1.5) {
-    messages.push(pick([
-      `${tSB} stop backs?! You're on fire, ${hey}. Days like this are where months get made — ride it.`,
-      `Way past goal and still moving. This is record pace. Don't let up now.`,
-      `You're cooking this ${part}. ${tSB} on the board — keep the foot down.`,
-    ], "crush"));
-  } else if (goal > 0 && tSB >= goal) {
-    messages.push(pick([
-      `Goal hit — ${tSB} stop backs. 🔥 Everything from here is bonus. How many extra you got in you?`,
-      `That's your number, ${hey}. Most reps coast now; the great ones keep knocking while they're hot.`,
-      `${tSB}/${goal} — done. Bank it, then steal a few more before you call it.`,
-    ], "hit"));
-  } else if (goal > 0 && remaining <= 2 && tSB > 0) {
-    messages.push(pick([
-      `So close — ${remaining} more and the goal's yours. Don't coast now, ${hey}.`,
-      `${remaining} away. This is where good reps finish. Two more doors.`,
-      `Almost there: ${remaining} to go. Line up the next couple and close it out.`,
-    ], "near"));
-  } else if (goal > 0 && tSB > 0) {
-    messages.push(pick([
-      `${remaining} more to hit goal. You get a number at ~${ratePct}% of doors, so line up about ${doors}. Go.`,
-      `You're at ${tSB}/${goal}, ${hey}. Not behind — just not done. ~${doors} more doors gets you there.`,
-      `${remaining} to go. At your ~${ratePct}% rate that's roughly ${doors} knocks. Tighten the pitch and grind them out.`,
-    ], "behind"));
-  } else {
-    // No stop backs yet today (has history)
-    messages.push(pick([
-      `${part === "morning" ? "Morning" : "Fresh"} reset, ${hey}. ${streak > 0 ? `${streak}-day streak says you know the drill.` : "You've done this before."} Go get today's first number.`,
-      `Nothing logged yet today. First door's the hardest — knock it and the rest follow.`,
-      `Clean slate for today. Line up your first few and let momentum do the work.`,
-    ], "fresh"));
-  }
-
-  // ---- Secondary: your money pattern (if there's a clear one) ----
-  if (best) {
-    messages.push(pick([
-      `Pattern I'm seeing: your sales cluster in your "${best}" leads. Re-touch those first — that's where your money is.`,
-      `Your "${best}" leads convert best for you. Prioritize them today over cold ones.`,
-    ], "best" + best));
-  }
-
-  // ---- Third: streak protect, or a quick objection rep ----
-  if (streak >= 3) {
-    messages.push(pick([
-      `${streak} days straight. Consistency is the real edge here — protect the streak today.`,
-      `Don't break the chain: ${streak} days and counting. One log keeps it alive.`,
-    ], "streak"));
-  } else {
-    const obj = OBJECTIONS[dayNumber() % OBJECTIONS.length];
-    messages.push(`Quick rep — when they say "${obj.q}": ${obj.a}`);
-  }
-
-  return messages.slice(0, 3);
-}
-
-function callbacksPost() {
-  const due = dueCallbacks();
-  if (!due.length) return null;
-  const today = localDateStr();
-  const node = el(`
-    <article class="post">
-      <div class="post-head">
-        <span class="avatar" style="background:var(--red)">📞</span>
-        <div><span class="post-author">Callbacks Due</span><span class="post-tag">Don't let these slip</span></div>
-      </div>
-      <div class="cb-rows"></div>
-    </article>`);
-  const rows = node.querySelector(".cb-rows");
-  due.forEach((l) => {
-    const digits = phoneDigits(l.phone);
-    const label = l.callback === today ? "Due today" : "Overdue · " + formatDateShort(l.callback);
-    const row = el(`
-      <div class="hit">
-        <span class="hit-rank" style="background:var(--red)">!</span>
-        <div class="hit-info">
-          <div class="hit-name">${escapeHtml(l.name)}</div>
-          <div class="hit-method" style="color:var(--red)">${label}${l.address ? " · " + escapeHtml(l.address) : ""}</div>
-        </div>
-        <div class="hit-actions">
-          <a href="tel:${digits}">Call</a>
-          <a href="sms:${digits}">Text</a>
-          <button class="cb-done" type="button">Done</button>
-        </div>
-      </div>`);
-    row.querySelector(".cb-done").onclick = () => { l.callback = ""; render(); };
-    rows.appendChild(row);
-  });
-  return node;
-}
-
+// THE feature card of the feed: who to hit today. Scheduled callbacks that
+// are due today / overdue are pinned on top (soonest first, time shown);
+// rotating picks fill the remaining slots up to 5. No selling advice —
+// just people and the action.
 function hitListPost() {
-  const hits = dailyHitList();
-  if (!hits.length) return null;
+  const due = dueCallbacks();
+  const dueIds = new Set(due.map((l) => l.id));
+  const picks = dailyHitList().filter((h) => !dueIds.has(h.lead.id));
+
+  const rows = due.map((l) => ({
+    lead: l,
+    label: (callbackOverdue(l.callbackAt) ? "Overdue — " : "Scheduled — ") + formatCallback(l.callbackAt),
+    isCallback: true,
+    overdue: callbackOverdue(l.callbackAt),
+  }));
+  picks.forEach((h) => {
+    if (rows.length < 5) rows.push({ lead: h.lead, label: h.method, isCallback: false });
+  });
+
   const node = el(`
-    <article class="post">
+    <article class="post post-hitlist">
       <div class="post-head">
-        <span class="avatar avatar-ai">🎯</span>
-        <div><span class="post-author">Today's Hit List</span><span class="post-tag">Smart picks · rotates daily</span></div>
+        <span class="avatar avatar-ai big">🎯</span>
+        <div>
+          <span class="post-author hl-heading">Today's Hit List</span>
+          <span class="post-tag">Who to text, call, or stop back today</span>
+        </div>
       </div>
       <div class="hl-rows"></div>
+      <p class="empty-hint" hidden>No one to chase yet — get a number and they'll show up here. 🚪</p>
     </article>`);
-  const rows = node.querySelector(".hl-rows");
-  hits.forEach((h, i) => {
-    const digits = phoneDigits(h.lead.phone);
-    rows.appendChild(el(`
+
+  const rowsEl = node.querySelector(".hl-rows");
+  if (!rows.length) {
+    node.querySelector(".empty-hint").hidden = false;
+    return node;
+  }
+
+  rows.forEach((r, i) => {
+    const digits = phoneDigits(r.lead.phone);
+    const icon = r.isCallback ? "📞" : r.label === "Text" ? "📱" : r.label === "Call" ? "📞" : "🚪";
+    const row = el(`
       <div class="hit">
-        <span class="hit-rank">${i + 1}</span>
+        <span class="hit-rank${r.isCallback ? " urgent" : ""}">${i + 1}</span>
         <div class="hit-info">
-          <div class="hit-name">${escapeHtml(h.lead.name)}</div>
-          <div class="hit-method">Today: ${h.method}${h.lead.address ? " · " + escapeHtml(h.lead.address) : ""}</div>
+          <div class="hit-name">${escapeHtml(r.lead.name)}</div>
+          <div class="hit-method${r.overdue ? " due" : ""}">${icon} ${escapeHtml(r.label)}${r.lead.address ? " · " + escapeHtml(r.lead.address) : ""}</div>
         </div>
         <div class="hit-actions">
           <a href="tel:${digits}">Call</a>
           <a href="sms:${digits}">Text</a>
+          ${r.isCallback ? '<button class="cb-done" type="button">Done</button>' : ""}
         </div>
-      </div>`));
+      </div>`);
+    const done = row.querySelector(".cb-done");
+    if (done)
+      done.onclick = () => {
+        r.lead.callbackAt = "";
+        render();
+        dbUpdateLead(r.lead.id, { callback_at: "" }).catch(dbFail("Couldn't update callback"));
+      };
+    rowsEl.appendChild(row);
   });
   return node;
-}
-
-function yourHighlightPosts() {
-  const out = [];
-  const me = state.profile.name || "You";
-  const av = `<span class="avatar avatar-you">${initials(me)}</span>`;
-  const streak = currentStreak();
-  const sales = salesTotal();
-  const today = localDateStr();
-  const todays = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today).length;
-  const best = bestDay();
-
-  const hl = (id, banner, tone, body) => {
-    const node = el(`
-      <article class="post post-highlight">
-        <div class="post-head">${av}<div><span class="post-author">${escapeHtml(me)}</span><span class="post-tag">Your highlight</span></div></div>
-        <div class="highlight-banner ${tone}">${banner}</div>
-        <p class="post-body">${body}</p>
-        <div class="post-foot"><button class="react" type="button">🔥 <span>0</span></button></div>
-      </article>`);
-    attachReact(node, id);
-    return node;
-  };
-
-  if (streak >= 2) out.push(hl("you-streak-" + streak, `🔥 ${streak}-day streak`, "", `${streak} days straight. Consistency is the whole game in D2D.`));
-  if (sales >= 1) out.push(hl("you-sales-" + sales, `💰 ${sales} lifetime sale${sales > 1 ? "s" : ""}`, "ink", sales === 1 ? "First one's on the board. Go get the next." : "Sales are stacking up — your pipeline works."));
-  if (todays > 0 && best > 0 && todays >= best) out.push(hl("you-record-" + today, `📈 ${todays} stop backs today`, "", "That ties or beats your best day. Record pace."));
-  return out;
-}
-
-function friendPosts() {
-  const friends = [...DEMO_FRIENDS, ...state.friends];
-  return friends.map((f) => {
-    const seed = hashStr(f.id + localDateStr());
-    const n = (seed % 5) + 2;
-    const hi = FRIEND_HIGHLIGHTS[seed % FRIEND_HIGHLIGHTS.length](n);
-    const id = "fr-" + f.id + "-" + dayNumber();
-    const node = el(`
-      <article class="post post-friend">
-        <div class="post-head">
-          <span class="avatar" style="background:var(--green-deep)">${initials(f.name)}</span>
-          <div><span class="post-author">${escapeHtml(f.name)}</span><span class="post-tag">Friend · today</span></div>
-        </div>
-        <div class="highlight-banner ${hi.tone}">${hi.text}</div>
-        <div class="post-foot"><button class="react" type="button">🔥 <span>0</span></button></div>
-      </article>`);
-    attachReact(node, id);
-    return node;
-  });
 }
 
 function weeklyRecapPost() {
@@ -646,18 +542,6 @@ function weeklyRecapPost() {
     </article>`);
 }
 
-function motivationPost() {
-  const quote = MOTIVATION[dayNumber() % MOTIVATION.length];
-  return el(`
-    <article class="post post-coach">
-      <div class="post-head">
-        <span class="avatar avatar-ai">✦</span>
-        <div><span class="post-author">StopBack Coach</span><span class="post-tag">Daily fuel</span></div>
-      </div>
-      <p class="post-body" style="font-size:1.05rem;font-family:var(--font-display);">"${quote}"</p>
-    </article>`);
-}
-
 // Gentle nudge when a live streak hasn't been fed today.
 function streakRiskPost() {
   const streak = currentStreak();
@@ -672,49 +556,73 @@ function streakRiskPost() {
     </article>`);
 }
 
-// Circular progress toward today's stop-back goal.
-function goalPost(animate) {
-  const goal = state.profile.dailyGoal || 0;
-  if (goal <= 0) return null;
-  const today = localDateStr();
-  const todays = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today).length;
-  const frac = Math.min(todays / goal, 1);
-  const pctText = Math.round(frac * 100) + "%";
-  const r = 34;
+// One goal ring (SVG) with the count centered and a label underneath.
+// The real end offset is stashed in data-offset so the fill can animate in.
+function ringHtml(value, goal, cls, label, animate) {
+  const r = 30;
   const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - frac);
-  const done = todays >= goal;
-  const msg = done
-    ? "Goal crushed — everything from here is bonus. 🔥"
-    : `${goal - todays} more stop back${goal - todays > 1 ? "s" : ""} to hit today's goal.`;
-
-  // Start empty and fill to target so the ring animates on first load.
+  const offset = circ * (1 - Math.min(value / goal, 1));
   const startOffset = animate ? circ : offset;
-
-  const node = el(`
-    <article class="post post-goal">
-      <div class="goal-ring">
-        <svg viewBox="0 0 80 80">
-          <circle class="ring-bg" cx="40" cy="40" r="${r}"></circle>
-          <circle class="ring-fg ${done ? "done" : ""}" cx="40" cy="40" r="${r}"
+  return `
+    <div class="goal-col">
+      <div class="goal-ring" data-offset="${offset.toFixed(1)}">
+        <svg viewBox="0 0 72 72">
+          <circle class="ring-bg" cx="36" cy="36" r="${r}"></circle>
+          <circle class="ring-fg ${cls} ${value >= goal ? "done" : ""}" cx="36" cy="36" r="${r}"
             stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${startOffset.toFixed(1)}"></circle>
         </svg>
         <div class="goal-ring-center">
-          <span class="goal-num">${todays}</span><span class="goal-of">/ ${goal}</span>
+          <span class="goal-num">${value}</span><span class="goal-of">/ ${goal}</span>
         </div>
       </div>
+      <span class="goal-label">${label}</span>
+    </div>`;
+}
+
+// Twin progress rings: today's stop backs AND sales vs your daily goals.
+function goalPost(animate) {
+  const sbGoal = state.profile.dailyGoal || 0;
+  const sGoal = state.profile.salesGoal || 0;
+  if (sbGoal <= 0 && sGoal <= 0) return null;
+
+  const today = localDateStr();
+  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
+  const sb = todayLeads.length;
+  const sales = state.leads.filter(
+    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === today
+  ).length;
+
+  const rings = [];
+  if (sbGoal > 0) rings.push(ringHtml(sb, sbGoal, "", "Stop backs", animate));
+  if (sGoal > 0) rings.push(ringHtml(sales, sGoal, "sales", "Sales", animate));
+
+  const sbLeft = Math.max(0, sbGoal - sb);
+  const sLeft = Math.max(0, sGoal - sales);
+  const msg =
+    sbLeft === 0 && sLeft === 0
+      ? "Both goals down — everything from here is bonus. 🔥"
+      : [
+          sbLeft ? `${sbLeft} stop back${sbLeft > 1 ? "s" : ""}` : "",
+          sLeft ? `${sLeft} sale${sLeft > 1 ? "s" : ""}` : "",
+        ].filter(Boolean).join(" and ") + " to go today.";
+
+  const node = el(`
+    <article class="post post-goal">
+      <div class="goal-cols">${rings.join("")}</div>
       <div class="goal-text">
-        <span class="post-tag">Today's goal</span>
-        <h3 class="post-title">${pctText} there</h3>
+        <span class="post-tag">Today's goals</span>
         <p class="post-body">${msg}</p>
       </div>
     </article>`);
 
   if (animate) {
-    const fg = node.querySelector(".ring-fg");
-    // Two rAFs so the browser paints the empty state before transitioning.
+    // Two rAFs so the browser paints the empty rings before filling them.
     requestAnimationFrame(() =>
-      requestAnimationFrame(() => { fg.style.strokeDashoffset = offset.toFixed(1); })
+      requestAnimationFrame(() => {
+        node.querySelectorAll(".goal-ring").forEach((g) => {
+          g.querySelector(".ring-fg").style.strokeDashoffset = g.dataset.offset;
+        });
+      })
     );
   }
   return node;
@@ -728,9 +636,21 @@ function interleave(...lists) {
   return out;
 }
 
-// Animations (typing, card enter, ring fill) play on the FIRST feed build only,
-// so later re-renders (after logging, liking, etc.) don't re-type or re-jump.
+// Animations (card enter, ring fill) play on the FIRST feed build only,
+// so later re-renders (after logging, liking, etc.) don't re-jump.
 let feedAnimated = false;
+
+// Live stats for you + accepted friends — fills the feed's achievements.
+let friendsOverview = [];
+async function refreshFriendsOverview() {
+  if (!window.sb) return;
+  try {
+    friendsOverview = await dbGetFriendsOverview();
+    renderFeed();
+  } catch (err) {
+    console.error("[StopBack] Couldn't load the team feed:", err);
+  }
+}
 
 function renderFeed() {
   const name = state.profile.name ? state.profile.name.split(" ")[0] : "there";
@@ -744,20 +664,22 @@ function renderFeed() {
   const stream = document.getElementById("feed-stream");
   stream.innerHTML = "";
 
-  const coach = generateCoachMessages().map((m, i) => coachCard(m, i, animate));
-  const friends = friendPosts();
-  const highlights = yourHighlightPosts();
+  // Real achievements from the shared overview: yours + your friends'.
+  const rows = friendsOverview || [];
+  const mine = rows
+    .filter((r) => r.is_self)
+    .flatMap((r) => achievementsFor(r).map((a) => achievementPost(r, a)));
+  const theirs = rows
+    .filter((r) => !r.is_self)
+    .flatMap((r) => achievementsFor(r).map((a) => achievementPost(r, a)));
 
-  // Actionable stuff first, then an interleaved social mix.
+  // Hit list is the point of the feed — it leads. Social mix after.
   const posts = [
     streakRiskPost(),
     goalPost(animate),
-    callbacksPost(),
-    coach[0],
     hitListPost(),
-    ...interleave(highlights, friends, coach.slice(1)),
+    ...interleave(mine, theirs),
     weeklyRecapPost(),
-    motivationPost(),
   ].filter(Boolean);
 
   posts.forEach((p, i) => {
@@ -796,12 +718,17 @@ function bestDay() {
   return values.length ? Math.max(...values) : 0;
 }
 
-// Leads with a callback date that's today or in the past (still open).
+// Open leads whose callback is due today (even if later today) or overdue.
+// Sorted soonest-first so the most urgent is always on top.
 function dueCallbacks() {
   const today = localDateStr();
   return state.leads
-    .filter((l) => l.status === "stopback" && l.callback && l.callback <= today)
-    .sort((a, b) => a.callback.localeCompare(b.callback));
+    .filter((l) => {
+      if (l.status !== "stopback" || !l.callbackAt) return false;
+      const d = new Date(l.callbackAt);
+      return d.getTime() < Date.now() || localDateStr(d) === today;
+    })
+    .sort((a, b) => new Date(a.callbackAt) - new Date(b.callbackAt));
 }
 
 // =====================================================================
@@ -845,6 +772,9 @@ function renderLeads() {
         : `<span class="badge">Stop back</span>`;
 
     li.innerHTML = `
+      <button class="lead-edit" type="button" title="Edit lead" aria-label="Edit lead">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 014 4L7.5 20.5 3 22l1.5-4.5z"/></svg>
+      </button>
       <div class="lead-name">${escapeHtml(l.name)}</div>
       <div class="lead-phone">${escapeHtml(l.phone)}</div>
       ${l.address ? `<div class="lead-addr">📍 ${escapeHtml(l.address)}</div>` : ""}
@@ -853,22 +783,21 @@ function renderLeads() {
         ${statusBadge}
         ${l.interest ? `<span class="badge interest-${l.interest.toLowerCase()}">${escapeHtml(l.interest)}</span>` : ""}
         ${l.demeanor ? `<span class="badge demeanor">${escapeHtml(l.demeanor)}</span>` : ""}
-        ${l.callback ? `<span class="badge callback">📞 ${formatDateShort(l.callback)}</span>` : ""}
+        ${l.callbackAt ? `<span class="badge callback">📞 ${formatCallback(l.callbackAt)}</span>` : ""}
       </div>
       <div class="lead-actions">
         <button class="call">Call</button>
         <button class="text">Text</button>
         <button class="mark-missed ${l.status === "missed" ? "on" : ""}">Missed</button>
         <button class="mark-sale ${l.status === "sale" ? "on" : ""}">Sale</button>
-        <button class="edit">Edit</button>
         <button class="del">Delete</button>
       </div>`;
 
+    li.querySelector(".lead-edit").onclick = () => openEdit(l.id); // same modal as before
     li.querySelector(".call").onclick = () => (window.location.href = "tel:" + digits);
     li.querySelector(".text").onclick = () => (window.location.href = "sms:" + digits);
     li.querySelector(".mark-missed").onclick = () => toggleStatus(l.id, "missed");
     li.querySelector(".mark-sale").onclick = () => toggleStatus(l.id, "sale");
-    li.querySelector(".edit").onclick = () => openEdit(l.id);
     li.querySelector(".del").onclick = () => deleteLead(l.id);
     listEl.appendChild(li);
   });
@@ -1071,6 +1000,7 @@ function renderStatsDetail() {
 function renderProfile() {
   document.getElementById("p-name").value = state.profile.name;
   document.getElementById("p-goal").value = state.profile.dailyGoal;
+  document.getElementById("p-sales-goal").value = state.profile.salesGoal;
   document.getElementById("p-contacts").textContent = contactsTotal();
   document.getElementById("p-stopbacks").textContent = stopbacksTotal();
   document.getElementById("p-sales").textContent = salesTotal();
@@ -1096,6 +1026,11 @@ function renderProfile() {
     </div>`;
   }).join("");
 
+  // Sharing toggles
+  document.getElementById("pv-stats").checked = state.privacy.shareStats;
+  document.getElementById("pv-leads").checked = state.privacy.shareLeads;
+  document.getElementById("pv-phone").checked = state.privacy.sharePhone;
+
   // Past-stats inputs (only show a value if it's non-zero, so placeholder shows otherwise)
   document.getElementById("b-contacts").value = state.baseline.contacts || "";
   document.getElementById("b-stopbacks").value = state.baseline.stopbacks || "";
@@ -1113,7 +1048,6 @@ function render() {
   renderStats();
   renderProfile();
   renderProducts();
-  renderFriends();
   save();
 }
 
@@ -1126,22 +1060,27 @@ function addLead(e) {
   const phone = document.getElementById("f-phone").value.trim();
   if (!name || !phone) return;
 
-  state.leads.push({
-    id: Date.now(),
+  const lead = {
+    id: crypto.randomUUID(),
     name,
     phone,
     address: document.getElementById("f-address").value.trim(),
     demeanor: "",                                       // legacy field, kept for old data
     interest: document.getElementById("f-interest").value || "", // Interested | Maybe | Unlikely
     notes: document.getElementById("f-notes").value.trim(),
-    callback: document.getElementById("f-callback").value || "",
+    // datetime-local gives a local "YYYY-MM-DDTHH:MM"; store real ISO (UTC).
+    callbackAt: document.getElementById("f-callback").value
+      ? new Date(document.getElementById("f-callback").value).toISOString()
+      : "",
     status: "stopback",
     createdAt: new Date().toISOString(),
-  });
+  };
+  state.leads.push(lead);
 
   markActiveToday();
   render();
   runGamification();
+  dbAddLead(lead).catch(dbFail("Couldn't save lead"));
   e.target.reset();
   clearInterestChips();
   document.getElementById("f-name").focus();
@@ -1171,22 +1110,33 @@ function toggleStatus(id, status) {
   const lead = state.leads.find((l) => l.id === id);
   if (!lead) return;
   lead.status = lead.status === status ? "stopback" : status;
+  // Real sale timestamp — powers the "2 sales in an hour" achievement.
+  lead.soldAt = lead.status === "sale" ? new Date().toISOString() : "";
   markActiveToday();
   render();
   runGamification({ sale: lead.status === "sale" });
+  dbUpdateLead(id, { status: lead.status, sold_at: lead.soldAt }).catch(dbFail("Couldn't update lead"));
 }
 
 function deleteLead(id) {
   if (!confirm("Delete this lead?")) return;
   state.leads = state.leads.filter((l) => l.id !== id);
   render();
+  dbDeleteLead(id).catch(dbFail("Couldn't delete lead"));
 }
 
 function bumpTally(amount) {
-  state.contactsTally = Math.max(0, state.contactsTally + amount);
+  const next = Math.max(0, state.contactsTally + amount);
+  const changed = next !== state.contactsTally;
+  state.contactsTally = next;
   if (amount > 0) markActiveToday();
   render();
-  if (amount > 0) runGamification();
+  if (amount > 0) {
+    runGamification();
+    if (changed) dbLogContact().catch(dbFail("Couldn't log contact"));
+  } else if (amount < 0 && changed) {
+    dbUnlogContact().catch(dbFail("Couldn't update contacts"));
+  }
 }
 
 // ---- Edit a lead (modal) --------------------------------------------
@@ -1199,7 +1149,7 @@ function openEdit(id) {
   document.getElementById("e-address").value = l.address || "";
   document.getElementById("e-demeanor").value = l.demeanor || "Neutral";
   document.getElementById("e-notes").value = l.notes || "";
-  document.getElementById("e-callback").value = l.callback || "";
+  document.getElementById("e-callback").value = toLocalInputValue(l.callbackAt);
   document.getElementById("edit-modal").hidden = false;
 }
 
@@ -1209,7 +1159,7 @@ function closeEdit() {
 
 function submitEdit(e) {
   e.preventDefault();
-  const id = parseInt(document.getElementById("e-id").value, 10);
+  const id = document.getElementById("e-id").value; // uuid string
   const l = state.leads.find((x) => x.id === id);
   if (!l) return;
   l.name = document.getElementById("e-name").value.trim();
@@ -1217,9 +1167,14 @@ function submitEdit(e) {
   l.address = document.getElementById("e-address").value.trim();
   l.demeanor = document.getElementById("e-demeanor").value;
   l.notes = document.getElementById("e-notes").value.trim();
-  l.callback = document.getElementById("e-callback").value || "";
+  const cbVal = document.getElementById("e-callback").value;
+  l.callbackAt = cbVal ? new Date(cbVal).toISOString() : ""; // cleared = "none set"
   closeEdit();
   render();
+  dbUpdateLead(id, {
+    name: l.name, phone: l.phone, address: l.address,
+    demeanor: l.demeanor, notes: l.notes, callback_at: l.callbackAt,
+  }).catch(dbFail("Couldn't save changes"));
 }
 
 // ---- Products --------------------------------------------------------
@@ -1268,16 +1223,13 @@ function submitProduct(e) {
       p.name = name;
       p.price = price;
       p.features = features;
+      dbUpdateProduct(p.id, { name, price, features }).catch(dbFail("Couldn't save product"));
     }
     cancelEditProduct();
   } else {
-    state.products.push({
-      id: Date.now(),
-      name,
-      price,
-      features,
-      createdAt: new Date().toISOString(),
-    });
+    const prod = { id: crypto.randomUUID(), name, price, features, createdAt: new Date().toISOString() };
+    state.products.push(prod);
+    dbAddProduct(prod).catch(dbFail("Couldn't save product"));
     e.target.reset();
   }
   save();
@@ -1311,43 +1263,126 @@ function deleteProduct(id) {
   if (editingProductId === id) cancelEditProduct();
   save();
   renderProducts();
+  dbDeleteProduct(id).catch(dbFail("Couldn't delete product"));
 }
 
-// ---- Friends ---------------------------------------------------------
-function renderFriends() {
-  const list = document.getElementById("friends-list");
-  const empty = document.getElementById("friends-empty");
-  empty.style.display = state.friends.length ? "none" : "block";
-  list.innerHTML = "";
+// ---- Friends (real friend requests via Supabase) ---------------------
+let friendships = []; // cache of get_friendships() while the view is open
 
-  state.friends.forEach((f) => {
+// Accepted friends' user ids — used by the feed/leaderboard later.
+function acceptedFriendIds() {
+  return friendships.filter((f) => f.status === "accepted").map((f) => f.other_id);
+}
+
+async function loadFriends() {
+  try {
+    friendships = await dbGetFriendships();
+  } catch (err) {
+    console.error("[StopBack] Couldn't load friends:", err);
+    friendships = [];
+  }
+  renderFriendsLists();
+}
+
+function renderFriendsLists() {
+  const incoming = friendships.filter((f) => f.status === "pending" && f.direction === "incoming");
+  const outgoing = friendships.filter((f) => f.status === "pending" && f.direction === "outgoing");
+  const accepted = friendships.filter((f) => f.status === "accepted");
+
+  // Requests card (incoming to accept/decline, outgoing to cancel)
+  const reqCard = document.getElementById("requests-card");
+  const reqList = document.getElementById("requests-list");
+  reqCard.hidden = incoming.length === 0 && outgoing.length === 0;
+  reqList.innerHTML = "";
+
+  incoming.forEach((f) => {
     const li = el(`
       <li class="friend-item">
-        <span class="avatar" style="background:var(--green-deep)">${initials(f.name)}</span>
-        <span class="friend-name">${escapeHtml(f.name)}</span>
+        <span class="avatar" style="background:var(--green-deep)">${initials(f.display_name || f.username)}</span>
+        <span class="friend-name">${escapeHtml(f.display_name || f.username)}<br><span class="muted small">@${escapeHtml(f.username)} · wants to connect</span></span>
+        <span class="fr-actions">
+          <button class="fr-accept" type="button">Accept</button>
+          <button class="frdel" type="button">Decline</button>
+        </span>
+      </li>`);
+    li.querySelector(".fr-accept").onclick = () => acceptFriend(f.friendship_id);
+    li.querySelector(".frdel").onclick = () => removeFriend(f.friendship_id);
+    reqList.appendChild(li);
+  });
+
+  outgoing.forEach((f) => {
+    const li = el(`
+      <li class="friend-item">
+        <span class="avatar" style="background:var(--ink-soft)">${initials(f.display_name || f.username)}</span>
+        <span class="friend-name">${escapeHtml(f.display_name || f.username)}<br><span class="muted small">@${escapeHtml(f.username)} · request sent</span></span>
+        <button class="frdel" type="button">Cancel</button>
+      </li>`);
+    li.querySelector(".frdel").onclick = () => removeFriend(f.friendship_id);
+    reqList.appendChild(li);
+  });
+
+  // Accepted friends
+  const list = document.getElementById("friends-list");
+  document.getElementById("friends-empty").hidden = accepted.length > 0;
+  list.innerHTML = "";
+  accepted.forEach((f) => {
+    const li = el(`
+      <li class="friend-item">
+        <span class="avatar" style="background:var(--green-deep)">${initials(f.display_name || f.username)}</span>
+        <span class="friend-name">${escapeHtml(f.display_name || f.username)}<br><span class="muted small">@${escapeHtml(f.username)}</span></span>
         <button class="frdel" type="button">Remove</button>
       </li>`);
-    li.querySelector(".frdel").onclick = () => deleteFriend(f.id);
+    li.querySelector(".frdel").onclick = () => removeFriend(f.friendship_id);
     list.appendChild(li);
   });
 }
 
-function addFriend(e) {
-  e.preventDefault();
-  const name = document.getElementById("fr-name").value.trim();
-  if (!name) return;
-  state.friends.push({ id: "f" + Date.now(), name });
-  e.target.reset();
-  save();
-  renderFriends();
-  renderFeed();
+async function searchFriends(q) {
+  const resultsEl = document.getElementById("search-results");
+  if (!q.trim()) { resultsEl.innerHTML = ""; return; }
+  let results = [];
+  try {
+    results = await dbSearchProfiles(q.trim());
+  } catch (err) {
+    console.error("[StopBack] Search failed:", err);
+  }
+  const known = new Set(friendships.map((f) => f.other_id));
+  resultsEl.innerHTML = "";
+  if (!results.length) {
+    resultsEl.innerHTML = `<p class="muted small">No one found for "${escapeHtml(q)}".</p>`;
+    return;
+  }
+  results.forEach((r) => {
+    const already = known.has(r.id);
+    const li = el(`
+      <div class="friend-item">
+        <span class="avatar" style="background:var(--green-deep)">${initials(r.display_name || r.username)}</span>
+        <span class="friend-name">${escapeHtml(r.display_name || r.username)}<br><span class="muted small">@${escapeHtml(r.username)}</span></span>
+        <button class="fr-accept" type="button" ${already ? "disabled" : ""}>${already ? "Pending/Friend" : "Add"}</button>
+      </div>`);
+    if (!already) li.querySelector(".fr-accept").onclick = () => sendFriendRequest(r.id);
+    resultsEl.appendChild(li);
+  });
 }
 
-function deleteFriend(id) {
-  state.friends = state.friends.filter((f) => f.id !== id);
-  save();
-  renderFriends();
-  renderFeed();
+async function sendFriendRequest(otherId) {
+  try {
+    await dbSendRequest(otherId);
+    toast("Request sent 👍");
+    document.getElementById("friend-search").value = "";
+    document.getElementById("search-results").innerHTML = "";
+    await loadFriends();
+  } catch (err) {
+    dbFail("Couldn't send request")(err);
+  }
+}
+async function acceptFriend(id) {
+  try { await dbAcceptFriendship(id); toast("Friend added 🎉"); await loadFriends(); }
+  catch (err) { dbFail("Couldn't accept")(err); }
+}
+async function removeFriend(id) {
+  try { await dbDeleteFriendship(id); await loadFriends(); }
+  catch (err) { dbFail("Couldn't update")(err); }
 }
 
 // ---- Backup ----------------------------------------------------------
@@ -1374,7 +1409,7 @@ function exportCsv() {
     l.address,
     l.demeanor,
     l.status,
-    l.callback || "",
+    l.callbackAt ? new Date(l.callbackAt).toLocaleString() : "",
     l.notes || "",
     new Date(l.createdAt).toLocaleString(),
   ]);
@@ -1424,10 +1459,29 @@ function switchView(view) {
 // =====================================================================
 //  Init
 // =====================================================================
-function init() {
-  load();
-  initGamify(); // sync earned badges silently — no celebration on page load
 
+// Loads data and paints the app. Called by the auth layer once a rep is
+// signed in (Phase 2). For now it still reads from localStorage; the Supabase
+// data layer swaps in behind this same entry point in the next commit.
+async function startApp() {
+  try {
+    state = await dbLoadState(); // pull this rep's data from Supabase
+  } catch (err) {
+    console.error("[StopBack] Failed to load your data:", err);
+    if (typeof toast === "function") toast("⚠ Couldn't load your data");
+    state = structuredClone(DEFAULT_STATE);
+  }
+  initGamify(); // sync earned badges silently — no celebration on page load
+  render();
+  // Keep the shareable streak in sync (e.g. if it lapsed since last login).
+  if (window.dbSaveProfile)
+    dbSaveProfile({ current_streak: currentStreak() }).catch(() => {});
+  refreshFriendsOverview(); // pull the team feed's achievements
+}
+
+// Wires DOM event listeners exactly once, before auth decides which screen
+// to show. Safe to run while logged out (the app views are just hidden).
+function wireEvents() {
   document.getElementById("today-label").textContent = new Date().toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -1442,15 +1496,22 @@ function init() {
   document.getElementById("tally-minus").addEventListener("click", () => bumpTally(-1));
   document.getElementById("search").addEventListener("input", renderLeads);
 
-  // Profile fields save as you type.
+  // Profile fields save as you type (debounced write to Supabase).
   document.getElementById("p-name").addEventListener("input", (e) => {
     state.profile.name = e.target.value;
     save();
     renderFeed();
+    saveProfileDebounced({ display_name: e.target.value });
   });
   document.getElementById("p-goal").addEventListener("input", (e) => {
     state.profile.dailyGoal = parseInt(e.target.value, 10) || 0;
     save();
+    saveProfileDebounced({ daily_goal: state.profile.dailyGoal });
+  });
+  document.getElementById("p-sales-goal").addEventListener("input", (e) => {
+    state.profile.salesGoal = parseInt(e.target.value, 10) || 0;
+    save();
+    saveProfileDebounced({ daily_sales_goal: state.profile.salesGoal });
   });
 
   // Import-past-stats inputs. We update totals everywhere but DON'T re-render
@@ -1465,6 +1526,7 @@ function init() {
       document.getElementById("p-contacts").textContent = contactsTotal();
       document.getElementById("p-stopbacks").textContent = stopbacksTotal();
       document.getElementById("p-sales").textContent = salesTotal();
+      saveProfileDebounced({ ["baseline_" + key]: state.baseline[key] });
     });
   });
 
@@ -1478,7 +1540,10 @@ function init() {
   });
 
   document.querySelectorAll(".nav-btn").forEach((btn) => {
-    btn.addEventListener("click", () => switchView(btn.dataset.view));
+    btn.addEventListener("click", () => {
+      switchView(btn.dataset.view);
+      if (btn.dataset.view === "feed") refreshFriendsOverview(); // fresh team stats
+    });
   });
 
   // Empty-state call-to-action buttons jump to the relevant tab.
@@ -1509,12 +1574,39 @@ function init() {
   document.getElementById("product-form").addEventListener("submit", submitProduct);
   document.getElementById("product-cancel").addEventListener("click", cancelEditProduct);
 
-  // Friends
-  document.getElementById("open-friends").addEventListener("click", () => switchView("friends"));
-  document.getElementById("friends-back").addEventListener("click", () => switchView("profile"));
-  document.getElementById("friend-form").addEventListener("submit", addFriend);
+  // Sharing toggles → persist to profiles (respected by the SQL functions)
+  document.getElementById("pv-stats").addEventListener("change", (e) => {
+    state.privacy.shareStats = e.target.checked;
+    dbSaveProfile({ share_stats: e.target.checked }).catch(dbFail("Couldn't save setting"));
+  });
+  document.getElementById("pv-leads").addEventListener("change", (e) => {
+    state.privacy.shareLeads = e.target.checked;
+    dbSaveProfile({ share_leads: e.target.checked }).catch(dbFail("Couldn't save setting"));
+  });
+  document.getElementById("pv-phone").addEventListener("change", (e) => {
+    state.privacy.sharePhone = e.target.checked;
+    dbSaveProfile({ share_phone: e.target.checked }).catch(dbFail("Couldn't save setting"));
+  });
 
-  render();
+  // Friends (real requests)
+  document.getElementById("open-friends").addEventListener("click", () => {
+    switchView("friends");
+    loadFriends();
+  });
+  document.getElementById("friends-back").addEventListener("click", () => switchView("profile"));
+  document.getElementById("friend-search-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    searchFriends(document.getElementById("friend-search").value);
+  });
+  document.getElementById("friend-search").addEventListener("input", debounce((e) => searchFriends(e.target.value), 350));
 }
 
-init();
+// Boot: wire listeners once, then hand off to the auth layer, which routes to
+// the sign-in screen, onboarding, or the app (calling startApp when ready).
+function boot() {
+  wireEvents();
+  if (window.Auth) Auth.begin(startApp);
+  else startApp(); // safety fallback if the auth script didn't load
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();
