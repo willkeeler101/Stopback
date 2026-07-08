@@ -11,7 +11,7 @@ const DEFAULT_STATE = {
   contactsTally: 0,        // people talked to without getting a number
   leads: [],               // full stop-back records
   activeDays: [],          // "YYYY-MM-DD" strings — used for streaks
-  profile: { name: "", dailyGoal: 5 },
+  profile: { name: "", dailyGoal: 5, salesGoal: 2 },
   // Historical totals from before using the app — added on top of live data.
   baseline: { contacts: 0, stopbacks: 0, missed: 0, sales: 0 },
   products: [],            // things you sell (for the brochure)
@@ -725,49 +725,73 @@ function streakRiskPost() {
     </article>`);
 }
 
-// Circular progress toward today's stop-back goal.
-function goalPost(animate) {
-  const goal = state.profile.dailyGoal || 0;
-  if (goal <= 0) return null;
-  const today = localDateStr();
-  const todays = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today).length;
-  const frac = Math.min(todays / goal, 1);
-  const pctText = Math.round(frac * 100) + "%";
-  const r = 34;
+// One goal ring (SVG) with the count centered and a label underneath.
+// The real end offset is stashed in data-offset so the fill can animate in.
+function ringHtml(value, goal, cls, label, animate) {
+  const r = 30;
   const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - frac);
-  const done = todays >= goal;
-  const msg = done
-    ? "Goal crushed — everything from here is bonus. 🔥"
-    : `${goal - todays} more stop back${goal - todays > 1 ? "s" : ""} to hit today's goal.`;
-
-  // Start empty and fill to target so the ring animates on first load.
+  const offset = circ * (1 - Math.min(value / goal, 1));
   const startOffset = animate ? circ : offset;
-
-  const node = el(`
-    <article class="post post-goal">
-      <div class="goal-ring">
-        <svg viewBox="0 0 80 80">
-          <circle class="ring-bg" cx="40" cy="40" r="${r}"></circle>
-          <circle class="ring-fg ${done ? "done" : ""}" cx="40" cy="40" r="${r}"
+  return `
+    <div class="goal-col">
+      <div class="goal-ring" data-offset="${offset.toFixed(1)}">
+        <svg viewBox="0 0 72 72">
+          <circle class="ring-bg" cx="36" cy="36" r="${r}"></circle>
+          <circle class="ring-fg ${cls} ${value >= goal ? "done" : ""}" cx="36" cy="36" r="${r}"
             stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${startOffset.toFixed(1)}"></circle>
         </svg>
         <div class="goal-ring-center">
-          <span class="goal-num">${todays}</span><span class="goal-of">/ ${goal}</span>
+          <span class="goal-num">${value}</span><span class="goal-of">/ ${goal}</span>
         </div>
       </div>
+      <span class="goal-label">${label}</span>
+    </div>`;
+}
+
+// Twin progress rings: today's stop backs AND sales vs your daily goals.
+function goalPost(animate) {
+  const sbGoal = state.profile.dailyGoal || 0;
+  const sGoal = state.profile.salesGoal || 0;
+  if (sbGoal <= 0 && sGoal <= 0) return null;
+
+  const today = localDateStr();
+  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
+  const sb = todayLeads.length;
+  const sales = state.leads.filter(
+    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === today
+  ).length;
+
+  const rings = [];
+  if (sbGoal > 0) rings.push(ringHtml(sb, sbGoal, "", "Stop backs", animate));
+  if (sGoal > 0) rings.push(ringHtml(sales, sGoal, "sales", "Sales", animate));
+
+  const sbLeft = Math.max(0, sbGoal - sb);
+  const sLeft = Math.max(0, sGoal - sales);
+  const msg =
+    sbLeft === 0 && sLeft === 0
+      ? "Both goals down — everything from here is bonus. 🔥"
+      : [
+          sbLeft ? `${sbLeft} stop back${sbLeft > 1 ? "s" : ""}` : "",
+          sLeft ? `${sLeft} sale${sLeft > 1 ? "s" : ""}` : "",
+        ].filter(Boolean).join(" and ") + " to go today.";
+
+  const node = el(`
+    <article class="post post-goal">
+      <div class="goal-cols">${rings.join("")}</div>
       <div class="goal-text">
-        <span class="post-tag">Today's goal</span>
-        <h3 class="post-title">${pctText} there</h3>
+        <span class="post-tag">Today's goals</span>
         <p class="post-body">${msg}</p>
       </div>
     </article>`);
 
   if (animate) {
-    const fg = node.querySelector(".ring-fg");
-    // Two rAFs so the browser paints the empty state before transitioning.
+    // Two rAFs so the browser paints the empty rings before filling them.
     requestAnimationFrame(() =>
-      requestAnimationFrame(() => { fg.style.strokeDashoffset = offset.toFixed(1); })
+      requestAnimationFrame(() => {
+        node.querySelectorAll(".goal-ring").forEach((g) => {
+          g.querySelector(".ring-fg").style.strokeDashoffset = g.dataset.offset;
+        });
+      })
     );
   }
   return node;
@@ -1129,6 +1153,7 @@ function renderStatsDetail() {
 function renderProfile() {
   document.getElementById("p-name").value = state.profile.name;
   document.getElementById("p-goal").value = state.profile.dailyGoal;
+  document.getElementById("p-sales-goal").value = state.profile.salesGoal;
   document.getElementById("p-contacts").textContent = contactsTotal();
   document.getElementById("p-stopbacks").textContent = stopbacksTotal();
   document.getElementById("p-sales").textContent = salesTotal();
@@ -1632,6 +1657,11 @@ function wireEvents() {
     state.profile.dailyGoal = parseInt(e.target.value, 10) || 0;
     save();
     saveProfileDebounced({ daily_goal: state.profile.dailyGoal });
+  });
+  document.getElementById("p-sales-goal").addEventListener("input", (e) => {
+    state.profile.salesGoal = parseInt(e.target.value, 10) || 0;
+    save();
+    saveProfileDebounced({ daily_sales_goal: state.profile.salesGoal });
   });
 
   // Import-past-stats inputs. We update totals everywhere but DON'T re-render

@@ -122,10 +122,11 @@ const Auth = (function () {
       const username = document.getElementById("ob-username").value.trim();
       const display_name = document.getElementById("ob-name").value.trim();
       const daily_goal = parseInt(document.getElementById("ob-goal").value, 10) || 5;
+      const daily_sales_goal = parseInt(document.getElementById("ob-sales-goal").value, 10) || 2;
       const { data: { user } } = await sb.auth.getUser();
       const { error } = await sb
         .from("profiles")
-        .update({ username, display_name, daily_goal })
+        .update({ username, display_name, daily_goal, daily_sales_goal })
         .eq("id", user.id);
       if (error) {
         obError(
@@ -135,8 +136,6 @@ const Auth = (function () {
         );
         return;
       }
-      // Keep the interim localStorage app in sync until the data layer swaps in.
-      patchLocalProfile(display_name, daily_goal);
       route();
     });
 
@@ -144,17 +143,6 @@ const Auth = (function () {
       await sb.auth.signOut();
       // onAuthStateChange -> route() shows the sign-in screen.
     });
-  }
-
-  // Interim helper (removed in the data-layer commit): mirror onboarding
-  // values into the existing localStorage blob so the app shows them now.
-  function patchLocalProfile(name, goal) {
-    try {
-      const raw = localStorage.getItem("stopback-data-v1");
-      const data = raw ? JSON.parse(raw) : {};
-      data.profile = { ...(data.profile || {}), name, dailyGoal: goal };
-      localStorage.setItem("stopback-data-v1", JSON.stringify(data));
-    } catch (_) {}
   }
 
   // ---- entry point -------------------------------------------------------

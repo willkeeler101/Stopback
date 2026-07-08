@@ -656,10 +656,17 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .product-actions button:hover { border-color: var(--green); }
 .product-actions .pdel:hover { border-color: var(--red); color: var(--red); }
 
-/* ===== Goal progress ring (Feed) ===== */
-.post-goal { display: flex; align-items: center; gap: 1rem; }
-.goal-ring { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
-.goal-ring svg { width: 80px; height: 80px; transform: rotate(-90deg); }
+/* ===== Goal progress rings (Feed) ===== */
+.post-goal { display: flex; align-items: center; gap: var(--sp-4); }
+.goal-cols { display: flex; gap: var(--sp-4); flex-shrink: 0; }
+.goal-col { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); }
+.goal-label {
+  font-size: 0.68rem; color: var(--ink-soft); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ring-fg.sales { stroke: var(--amber); }
+.goal-ring { position: relative; width: 72px; height: 72px; flex-shrink: 0; }
+.goal-ring svg { width: 72px; height: 72px; transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: var(--paper-3); stroke-width: 8; }
 .ring-fg { fill: none; stroke: var(--green); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.5s ease; }
 .ring-fg.done { stroke: var(--green-deep); }

@@ -50,7 +50,11 @@ async function dbLoadState() {
 
   const profile = profileRes.data;
   if (profile) {
-    s.profile = { name: profile.display_name || "", dailyGoal: profile.daily_goal || 5 };
+    s.profile = {
+      name: profile.display_name || "",
+      dailyGoal: profile.daily_goal || 5,
+      salesGoal: profile.daily_sales_goal == null ? 2 : profile.daily_sales_goal,
+    };
     s.baseline = {
       contacts: profile.baseline_contacts || 0,
       stopbacks: profile.baseline_stopbacks || 0,
