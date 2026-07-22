@@ -17,6 +17,7 @@
 
   <!-- Leaflet (map view of leads) — free OpenStreetMap tiles, no API key -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -117,12 +118,35 @@
       </div>
 
       <div id="leads-map-wrap" hidden>
-        <div id="leads-map"></div>
-        <div class="map-empty" id="map-empty" hidden>
-          <span class="empty-emoji">🗺️</span>
-          <p class="empty-title">No houses pinned yet</p>
-          <p class="empty-copy">When you log a stop back, tap <strong>“Tag this house”</strong> to drop a pin here — right where you're standing.</p>
+        <!-- Pin filters — chip dot colors double as the map legend -->
+        <div class="map-filters" role="group" aria-label="Filter map pins">
+          <button class="mf-chip active" type="button" data-mf="all" aria-pressed="true">All</button>
+          <button class="mf-chip" type="button" data-mf="callbacks" aria-pressed="false">Callbacks</button>
+          <button class="mf-chip" type="button" data-mf="interested" aria-pressed="false">Interested</button>
+          <button class="mf-chip" type="button" data-mf="maybe" aria-pressed="false">Maybe</button>
+          <button class="mf-chip" type="button" data-mf="sales" aria-pressed="false">Sales</button>
+          <button class="mf-chip" type="button" data-mf="missed" aria-pressed="false">Missed</button>
         </div>
+
+        <div class="map-shell">
+          <div id="leads-map"></div>
+          <div class="map-tools">
+            <button class="map-tool" id="map-locate" type="button" title="Center on my location" aria-label="Center on my location">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+            </button>
+            <button class="map-tool" id="map-style" type="button" title="Toggle satellite view" aria-label="Toggle satellite view" aria-pressed="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+            </button>
+          </div>
+          <div class="map-empty" id="map-empty" hidden>
+            <span class="empty-emoji">🗺️</span>
+            <p class="empty-title">No houses pinned yet</p>
+            <p class="empty-copy">When you log a stop back, tap <strong>“Tag this house”</strong> to drop a pin here — right where you're standing.</p>
+          </div>
+        </div>
+
+        <!-- One live insight computed from real map data (callback zones) -->
+        <button class="map-insight" id="map-insight" type="button" hidden></button>
       </div>
     </section>
 
@@ -428,6 +452,31 @@
   </main>
 
   <!-- ===================== EDIT LEAD MODAL ===================== -->
+  <!-- ============ Map bottom sheet — quick actions for a tapped pin ============ -->
+  <div class="sheet-backdrop" id="map-sheet-backdrop" hidden></div>
+  <div class="map-sheet" id="map-sheet" hidden role="dialog" aria-modal="true" aria-label="Lead quick actions">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="sheet-head">
+      <div class="sheet-who">
+        <div class="sheet-name" id="ms-name"></div>
+        <div class="sheet-sub" id="ms-sub"></div>
+      </div>
+      <span class="badge" id="ms-badge"></span>
+    </div>
+    <div class="sheet-badges" id="ms-badges"></div>
+    <div class="sheet-actions">
+      <a class="sa-btn sa-primary" id="ms-call">Call</a>
+      <a class="sa-btn" id="ms-text">Text</a>
+      <a class="sa-btn" id="ms-directions" target="_blank" rel="noopener">Directions</a>
+    </div>
+    <div class="sheet-actions">
+      <button class="sa-btn sa-sale" id="ms-sale" type="button">Sale</button>
+      <button class="sa-btn sa-missed" id="ms-missed" type="button">Missed</button>
+      <button class="sa-btn" id="ms-edit" type="button">Edit</button>
+      <button class="sa-btn sa-del" id="ms-del" type="button">Delete</button>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="edit-modal" hidden>
     <div class="modal">
       <h2 class="card-title">Edit Lead</h2>
@@ -496,6 +545,7 @@
   <!-- Supabase client + auth (Phase 2). config.js holds your keys (gitignored). -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="config.js"></script>
   <script src="supabase.js"></script>
   <script src="auth.js"></script>

@@ -1310,43 +1310,89 @@ function renderCounters() {
 //  LEADS
 // =====================================================================
 // =====================================================================
-//  Map view (Leaflet) — pins every lead that has GPS coordinates,
-//  colored by status. Coordinates are captured at log time (see
-//  tagLocation) — the rep is standing at the door, so they're accurate.
+//  Map view (Leaflet) — the territory command center. Pins every lead
+//  that has GPS coordinates (captured at log time via tagLocation — the
+//  rep is standing at the door, so they're accurate). v2 adds premium
+//  basemaps, marker clustering, interest/callback-aware pins, filter
+//  chips, a bottom-sheet of quick actions, and a callback-zone insight.
+//  Phase B/C (heatmap, streets, routes, friends, AI): MAP-ARCHITECTURE.md.
 // =====================================================================
 let leadsMap = null;         // Leaflet map instance (created lazily)
-let leadsMapLayer = null;    // layer group holding the pins
+let leadsMapLayer = null;    // cluster group (or layerGroup fallback) holding pins
 let leadsViewMode = "list";  // "list" | "map"
+let mapFilter = "all";       // active .mf-chip — see leadMatchesMapFilter
+let mapSheetLeadId = null;   // lead currently shown in the bottom sheet
+let meMarker = null;         // "my location" dot
+let baseTileLayer = null;    // current basemap tile layer
+let insightZonePts = null;   // [[lat,lng]] the insight strip zooms to
 
 // Default center until there are pins: central Indiana (rep's home turf).
 const MAP_DEFAULT_CENTER = [39.7684, -86.1581];
 
+// Basemaps: CARTO Voyager reads clean and warm (Apple-Maps-like); Esri
+// World Imagery for satellite. Both free with attribution — volume/licensing
+// notes in MAP-ARCHITECTURE.md. The choice persists locally.
+const MAP_STYLES = {
+  standard: {
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    className: "tiles-standard", // CSS warms the tiles toward the papyrus brand
+  },
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri — Maxar, Earthstar Geographics",
+    className: "",
+  },
+};
+let mapStyle = localStorage.getItem("stopback-map-style") || "standard";
+
 const PIN_STATUS_LABEL = { sale: "Sale", missed: "Missed closing", stopback: "Stop back" };
 
-function pinIcon(status) {
-  const s = PIN_STATUS_LABEL[status] ? status : "stopback";
+// "Due" on the map = the Hit List's exact definition (callbackOverdue +
+// due-later-today), so the two features can never disagree about priority.
+function leadCallbackState(l) {
+  if (l.status !== "stopback" || !l.callbackAt) return "";
+  if (callbackOverdue(l.callbackAt)) return "overdue";
+  return localDateStr(new Date(l.callbackAt)) === localDateStr() ? "today" : "";
+}
+
+// Smart pin: tone from status + interest, ring from callback state. Due
+// callbacks are "today's priority" and pulse gently (reduced-motion aware).
+function pinIcon(l) {
+  let tone = "stopback";
+  if (l.status === "sale") tone = "sale";
+  else if (l.status === "missed") tone = "missed";
+  else if (l.interest === "Maybe") tone = "maybe";
+  else if (l.interest === "Unlikely") tone = "cold";
+  const cb = leadCallbackState(l);
+  const cls = "sb-pin sb-pin-" + tone + (cb ? " sb-pin-cb-" + cb + " sb-pin-priority" : "");
   return L.divIcon({
-    className: "sb-pin sb-pin-" + s,
+    className: cls,
     html: '<span class="sb-pin-dot"></span>',
     iconSize: [22, 22],
     iconAnchor: [11, 11],
-    popupAnchor: [0, -12],
   });
 }
 
-function mapPopupHtml(l) {
-  const digits = phoneDigits(l.phone);
-  const label = PIN_STATUS_LABEL[l.status] || "Stop back";
-  return (
-    `<div class="map-pop">` +
-    `<strong>${escapeHtml(l.name)}</strong>` +
-    `<span class="mp-status mp-${l.status}">${label}</span>` +
-    (l.address ? `<div class="mp-addr">📍 ${escapeHtml(l.address)}</div>` : "") +
-    `<div class="mp-actions">` +
-    `<a href="tel:${digits}">Call</a>` +
-    `<a href="sms:${digits}">Text</a>` +
-    `</div></div>`
-  );
+function clusterIcon(cluster) {
+  const n = cluster.getChildCount();
+  const size = n < 10 ? 34 : n < 50 ? 40 : 46;
+  return L.divIcon({ className: "sb-cluster", html: "<span>" + n + "</span>", iconSize: [size, size] });
+}
+
+function setMapStyle(name) {
+  mapStyle = MAP_STYLES[name] ? name : "standard";
+  localStorage.setItem("stopback-map-style", mapStyle);
+  const btn = document.getElementById("map-style");
+  if (btn) {
+    btn.classList.toggle("on", mapStyle === "satellite");
+    btn.setAttribute("aria-pressed", mapStyle === "satellite" ? "true" : "false");
+  }
+  if (!leadsMap) return;
+  if (baseTileLayer) leadsMap.removeLayer(baseTileLayer);
+  const s = MAP_STYLES[mapStyle];
+  baseTileLayer = L.tileLayer(s.url, { maxZoom: 19, attribution: s.attribution, className: s.className }).addTo(leadsMap);
 }
 
 // Create the map once, on first switch to map mode.
@@ -1357,31 +1403,103 @@ function ensureLeadsMap() {
     return null;
   }
   leadsMap = L.map("leads-map", { zoomControl: true });
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(leadsMap);
-  leadsMapLayer = L.layerGroup().addTo(leadsMap);
+  setMapStyle(mapStyle);
+  // Clustering keeps the DOM light at thousands of pins; if the plugin CDN
+  // didn't load, degrade to a plain layer group — the map still works.
+  leadsMapLayer = (typeof L.markerClusterGroup === "function"
+    ? L.markerClusterGroup({
+        chunkedLoading: true,
+        showCoverageOnHover: false,
+        maxClusterRadius: 46,
+        disableClusteringAtZoom: 17,
+        iconCreateFunction: clusterIcon,
+      })
+    : L.layerGroup()
+  ).addTo(leadsMap);
   leadsMap.setView(MAP_DEFAULT_CENTER, 12);
+  leadsMap.on("locationfound", (e) => {
+    if (meMarker) leadsMap.removeLayer(meMarker);
+    // Blue dot — the universal "you are here" convention (Apple/Google).
+    meMarker = L.circleMarker(e.latlng, {
+      radius: 7, color: "#fff", weight: 2, fillColor: "#1c6dd0", fillOpacity: 1,
+    }).addTo(leadsMap);
+  });
+  leadsMap.on("locationerror", () => toast("⚠ Couldn't get your location"));
   return leadsMap;
 }
 
-function renderLeadsMap() {
+function leadMatchesMapFilter(l) {
+  switch (mapFilter) {
+    case "callbacks":  return !!leadCallbackState(l);
+    case "interested": return l.status === "stopback" && l.interest === "Interested";
+    case "maybe":      return l.status === "stopback" && l.interest === "Maybe";
+    case "sales":      return l.status === "sale";
+    case "missed":     return l.status === "missed";
+    default:           return true;
+  }
+}
+
+// Straight-line meters between two points (plenty for walking-zone math).
+function distMeters(aLat, aLng, bLat, bLng) {
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (bLat - aLat) * rad, dLng = (bLng - aLng) * rad;
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// One live insight from real data: the densest walkable cluster of due
+// callbacks ("knock these out together"). O(n²) over due callbacks only,
+// capped at 400 — trivial at field scale; PostGIS takes over in Phase B.
+function renderMapInsight() {
+  const el = document.getElementById("map-insight");
+  const due = state.leads
+    .filter((l) => l.lat != null && l.lng != null && leadCallbackState(l))
+    .slice(0, 400);
+  let best = [];
+  due.forEach((a) => {
+    const group = due.filter((b) => distMeters(a.lat, a.lng, b.lat, b.lng) <= 150);
+    if (group.length > best.length) best = group;
+  });
+  if (best.length >= 2) {
+    insightZonePts = best.map((l) => [l.lat, l.lng]);
+    el.textContent = `${best.length} callbacks within a short walk — knock them out together. Tap to zoom.`;
+    el.hidden = false;
+  } else if (due.length) {
+    insightZonePts = due.map((l) => [l.lat, l.lng]);
+    el.textContent = `${due.length} callback${due.length > 1 ? "s" : ""} due on the map. Tap to frame ${due.length > 1 ? "them" : "it"}.`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+    insightZonePts = null;
+  }
+}
+
+function renderLeadsMap(opts) {
   if (!ensureLeadsMap()) return;
+  const fit = !!(opts && opts.fit);
   leadsMapLayer.clearLayers();
   const pts = [];
+  let tagged = 0;
   state.leads.forEach((l) => {
     if (l.lat == null || l.lng == null) return;
-    L.marker([l.lat, l.lng], { icon: pinIcon(l.status) })
-      .bindPopup(mapPopupHtml(l))
-      .addTo(leadsMapLayer);
+    tagged++;
+    if (!leadMatchesMapFilter(l)) return;
+    const m = L.marker([l.lat, l.lng], { icon: pinIcon(l) });
+    m.on("click", () => openMapSheet(l.id));
+    leadsMapLayer.addLayer(m);
     pts.push([l.lat, l.lng]);
   });
-  document.getElementById("map-empty").hidden = pts.length > 0;
-  // The container was hidden until now; fix sizing, then frame the pins.
+  // Empty overlay = "no houses tagged at all"; an empty *filter* result
+  // just shows the map (the active chip explains why).
+  document.getElementById("map-empty").hidden = tagged > 0;
+  renderMapInsight();
+  // The container may have been hidden; fix sizing, then frame the pins —
+  // but only when asked (mode/filter change), so background data syncs
+  // never yank the viewport while the rep is panning.
   setTimeout(() => {
     leadsMap.invalidateSize();
-    if (pts.length) leadsMap.fitBounds(pts, { padding: [40, 40], maxZoom: 17 });
+    if (fit && pts.length) leadsMap.fitBounds(pts, { padding: [40, 40], maxZoom: 17 });
   }, 0);
 }
 
@@ -1394,7 +1512,54 @@ function setLeadsMode(mode) {
   });
   document.getElementById("leads-list-wrap").hidden = mode !== "list";
   document.getElementById("leads-map-wrap").hidden = mode !== "map";
-  if (mode === "map") renderLeadsMap();
+  if (mode === "map") renderLeadsMap({ fit: true });
+}
+
+function locateMe() {
+  if (!ensureLeadsMap()) return;
+  leadsMap.locate({ setView: true, maxZoom: 17 });
+}
+
+// ---- Bottom sheet: quick actions for a tapped pin --------------------
+// Reuses the app's existing mutations (toggleStatus / deleteLead) and the
+// edit modal (which already covers reschedule-callback, notes, address) —
+// the sheet adds zero parallel logic.
+function openMapSheet(id) {
+  const l = state.leads.find((x) => x.id === id);
+  if (!l) return;
+  mapSheetLeadId = id;
+  document.getElementById("ms-name").textContent = l.name;
+  document.getElementById("ms-sub").textContent = l.address || l.phone;
+  const badge = document.getElementById("ms-badge");
+  badge.textContent = PIN_STATUS_LABEL[l.status] || "Stop back";
+  badge.className = "badge" + (l.status === "sale" ? " sale" : l.status === "missed" ? " missed" : "");
+  const chips = [];
+  if (l.interest)
+    chips.push(`<span class="badge interest-${l.interest.toLowerCase()}">${escapeHtml(l.interest)}</span>`);
+  if (l.callbackAt)
+    chips.push(`<span class="badge callback">📞 ${formatCallback(l.callbackAt)}</span>`);
+  document.getElementById("ms-badges").innerHTML = chips.join("");
+  const digits = phoneDigits(l.phone);
+  document.getElementById("ms-call").href = "tel:" + digits;
+  document.getElementById("ms-text").href = "sms:" + digits;
+  document.getElementById("ms-directions").href =
+    "https://www.google.com/maps/dir/?api=1&destination=" +
+    (l.lat != null ? l.lat + "," + l.lng : encodeURIComponent(l.address || ""));
+  document.getElementById("ms-sale").textContent = l.status === "sale" ? "Undo sale" : "Sale";
+  document.getElementById("ms-missed").textContent = l.status === "missed" ? "Undo missed" : "Missed";
+  document.getElementById("map-sheet-backdrop").hidden = false;
+  const sheet = document.getElementById("map-sheet");
+  sheet.hidden = false;
+  requestAnimationFrame(() => sheet.classList.add("open"));
+}
+
+function closeMapSheet() {
+  const sheet = document.getElementById("map-sheet");
+  if (sheet.hidden) return;
+  sheet.classList.remove("open");
+  document.getElementById("map-sheet-backdrop").hidden = true;
+  mapSheetLeadId = null;
+  setTimeout(() => { sheet.hidden = true; }, 220);
 }
 
 // ---- GPS capture in the Add Stop Back form --------------------------
@@ -2256,6 +2421,43 @@ function wireEvents() {
     b.addEventListener("click", () => setLeadsMode(b.dataset.mode))
   );
   document.getElementById("f-geo-btn").addEventListener("click", tagLocation);
+
+  // Map v2: filter chips, tools, insight strip, and the pin bottom sheet.
+  document.querySelectorAll(".mf-chip").forEach((c) =>
+    c.addEventListener("click", () => {
+      mapFilter = c.dataset.mf;
+      document.querySelectorAll(".mf-chip").forEach((x) => {
+        const on = x === c;
+        x.classList.toggle("active", on);
+        x.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      renderLeadsMap({ fit: true });
+    })
+  );
+  document.getElementById("map-locate").addEventListener("click", locateMe);
+  document.getElementById("map-style").addEventListener("click", () =>
+    setMapStyle(mapStyle === "standard" ? "satellite" : "standard")
+  );
+  document.getElementById("map-insight").addEventListener("click", () => {
+    if (insightZonePts && leadsMap)
+      leadsMap.fitBounds(insightZonePts, { padding: [60, 60], maxZoom: 18 });
+  });
+  document.getElementById("map-sheet-backdrop").addEventListener("click", closeMapSheet);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMapSheet(); });
+  // Sheet actions delegate to the app's existing mutations; capture the id
+  // before closing (close clears it).
+  document.getElementById("ms-sale").addEventListener("click", () => {
+    const id = mapSheetLeadId; closeMapSheet(); if (id) toggleStatus(id, "sale");
+  });
+  document.getElementById("ms-missed").addEventListener("click", () => {
+    const id = mapSheetLeadId; closeMapSheet(); if (id) toggleStatus(id, "missed");
+  });
+  document.getElementById("ms-edit").addEventListener("click", () => {
+    const id = mapSheetLeadId; closeMapSheet(); if (id) openEdit(id);
+  });
+  document.getElementById("ms-del").addEventListener("click", () => {
+    const id = mapSheetLeadId; closeMapSheet(); if (id) deleteLead(id);
+  });
 
   // Profile fields save as you type (debounced write to Supabase).
   document.getElementById("p-name").addEventListener("input", (e) => {

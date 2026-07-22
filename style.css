@@ -1091,7 +1091,7 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 }
 .linkish:hover { color: var(--green); }
 
-/* ===================== Leads: List ⇄ Map ===================== */
+/* ===================== Leads: List ⇄ Map (territory view) ===================== */
 .leads-toggle {
   display: flex; gap: 4px; padding: 4px;
   background: var(--paper-3); border: 1px solid var(--line);
@@ -1107,42 +1107,127 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   box-shadow: var(--shadow);
 }
 
+/* Filter chips — the dot doubles as the pin-color legend */
+.map-filters {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px;
+  margin-bottom: var(--sp-3); scrollbar-width: none;
+}
+.map-filters::-webkit-scrollbar { display: none; }
+.mf-chip {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px;
+  min-height: 40px; padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--paper-2);
+  color: var(--ink-soft); font-family: var(--font-body);
+  font-weight: 700; font-size: var(--fs-sub); cursor: pointer;
+}
+.mf-chip.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.mf-chip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; }
+.mf-chip[data-mf="all"]::before { display: none; }
+.mf-chip[data-mf="callbacks"]::before { background: var(--amber); box-shadow: 0 0 0 2px rgba(155, 34, 38, 0.45); }
+.mf-chip[data-mf="interested"]::before { background: var(--green); }
+.mf-chip[data-mf="maybe"]::before { background: var(--amber); }
+.mf-chip[data-mf="sales"]::before { background: var(--gold); }
+.mf-chip[data-mf="missed"]::before { background: var(--red); }
+
+.map-shell { position: relative; }
 #leads-map {
   height: 62vh; min-height: 340px; width: 100%;
   border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: var(--shadow); z-index: 0;
 }
 .leaflet-container { font-family: var(--font-body); background: var(--paper-2); }
+/* Nudge the standard basemap toward the papyrus brand */
+.tiles-standard { filter: saturate(0.92) sepia(0.06); }
 
-/* Status-colored map pins (Leaflet divIcon) */
+/* Floating map tools (locate, satellite) — 44px targets, thumb reach */
+.map-tools {
+  position: absolute; top: 12px; right: 12px; z-index: 800;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.map-tool {
+  width: 44px; height: 44px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--paper);
+  color: var(--green-deep); box-shadow: var(--shadow);
+  display: grid; place-items: center; cursor: pointer;
+}
+.map-tool svg { width: 22px; height: 22px; }
+.map-tool.on { background: var(--green); border-color: var(--green-deep); color: #fff; }
+
+/* Smart pins (Leaflet divIcon): tone = status/interest, ring = callback */
 .sb-pin-dot {
   display: block; width: 18px; height: 18px; border-radius: 50%;
   border: 2px solid #fff; box-shadow: 0 1px 4px rgba(33, 28, 22, 0.4);
 }
 .sb-pin-stopback .sb-pin-dot { background: var(--green); }
+.sb-pin-maybe    .sb-pin-dot { background: var(--amber); }
+.sb-pin-cold     .sb-pin-dot { background: #97a08b; } /* muted sage — "unlikely" */
 .sb-pin-missed   .sb-pin-dot { background: var(--red); }
 .sb-pin-sale     .sb-pin-dot { background: var(--gold); }
+.sb-pin-cb-today   .sb-pin-dot { box-shadow: 0 0 0 3px var(--amber), 0 1px 4px rgba(33, 28, 22, 0.4); }
+.sb-pin-cb-overdue .sb-pin-dot { box-shadow: 0 0 0 3px var(--red),   0 1px 4px rgba(33, 28, 22, 0.4); }
+/* Today's-priority pulse — subtle, and off for reduced-motion users */
+.sb-pin-priority .sb-pin-dot { animation: sbPinPulse 2.2s ease-in-out infinite; }
+@keyframes sbPinPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.16); }
+}
 
-/* Pin popup card */
-.map-pop { min-width: 140px; }
-.map-pop strong { display: block; font-size: 1rem; color: var(--ink); }
-.mp-status {
-  display: inline-block; margin-top: 3px; font-size: var(--fs-caption);
-  font-weight: 700; padding: 1px 8px; border-radius: 999px;
-  background: var(--green); color: #fff;
+/* Cluster badge — cream coin, Fraunces count */
+.sb-cluster {
+  background: var(--paper); border: 2px solid var(--green);
+  border-radius: 50%; box-shadow: var(--shadow);
+  display: grid; place-items: center;
 }
-.mp-status.mp-missed { background: var(--red); }
-.mp-status.mp-sale { background: var(--gold-deep); }
-.mp-addr { margin-top: 6px; font-size: var(--fs-caption); color: var(--ink-soft); }
-.mp-actions { display: flex; gap: 8px; margin-top: 8px; }
-.mp-actions a {
-  flex: 1; text-align: center; padding: 6px 0; border-radius: var(--radius-sm);
-  font-weight: 700; font-size: var(--fs-sub); text-decoration: none;
-  background: var(--green); color: #fff;
+.sb-cluster span {
+  font-family: var(--font-display); font-weight: 800;
+  font-size: 0.95rem; color: var(--green-deep);
 }
-.mp-actions a:last-child { background: var(--paper-3); color: var(--green-deep); }
 
 .map-empty { text-align: center; padding: var(--sp-5) var(--sp-4); }
+
+/* Insight strip under the map (tap to zoom the zone) */
+.map-insight {
+  display: block; width: 100%; text-align: left; margin-top: var(--sp-3);
+  background: var(--paper-2); border: 1px solid var(--line);
+  border-left: 4px solid var(--amber); border-radius: var(--radius-sm);
+  padding: 12px 14px; font-family: var(--font-body);
+  font-size: var(--fs-sub); font-weight: 600; color: var(--ink);
+  box-shadow: var(--shadow); cursor: pointer;
+}
+
+/* Bottom sheet — quick actions for a tapped pin */
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(33, 28, 22, 0.4); z-index: 116; }
+.map-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 117;
+  background: var(--paper); border-top: 1px solid var(--line);
+  border-radius: 20px 20px 0 0;
+  padding: 10px var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 30px rgba(33, 28, 22, 0.18);
+  transform: translateY(100%); transition: transform 0.22s ease;
+}
+.map-sheet.open { transform: translateY(0); }
+.sheet-handle { width: 42px; height: 5px; border-radius: 999px; background: var(--line); margin: 2px auto 12px; }
+.sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2); }
+.sheet-name { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; color: var(--ink); }
+.sheet-sub { color: var(--ink-soft); font-size: var(--fs-sub); margin-top: 2px; }
+.sheet-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--sp-2); }
+.sheet-actions { display: flex; gap: 8px; margin-top: var(--sp-3); }
+.sa-btn {
+  flex: 1; min-height: 48px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--paper-2); color: var(--ink); cursor: pointer;
+  font-family: var(--font-body); font-weight: 700; font-size: var(--fs-sub);
+  text-decoration: none;
+}
+.sa-primary { background: var(--green); border-color: var(--green-deep); color: #fff; }
+.sa-sale { color: var(--gold-deep); }
+.sa-missed { color: var(--red); }
+.sa-del { background: transparent; color: var(--red); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-pin-priority .sb-pin-dot { animation: none; }
+  .map-sheet { transition: none; }
+}
 
 /* GPS "Tag this house" control on the Add Stop Back form */
 .geo-row { display: flex; align-items: center; gap: var(--sp-3); margin: 2px 0 var(--sp-2); }
