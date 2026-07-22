@@ -1089,6 +1089,362 @@ function leaderboardPost() {
   return node;
 }
 
+// ---- Teams (company crews — migration 5) --------------------------------
+// A manager ("owner") creates a team; reps join with a code. Everyone on the
+// team shares aggregate stats, so the board + insights always fill. Data lives
+// in module vars (like the friends caches), not in `state`.
+let myTeams = [];        // get_my_teams()
+let activeTeamId = null;  // which team the Feed board/insights show
+let teamOverview = [];    // get_team_overview(activeTeamId)
+
+async function refreshTeams() {
+  if (!window.sb) return;
+  try {
+    myTeams = await dbGetMyTeams();
+    if (!myTeams.some((t) => t.id === activeTeamId))
+      activeTeamId = myTeams[0] ? myTeams[0].id : null;
+    teamOverview = activeTeamId ? await dbGetTeamOverview(activeTeamId) : [];
+  } catch (err) {
+    console.error("[StopBack] Couldn't load teams:", err);
+    myTeams = [];
+    teamOverview = [];
+  }
+  renderFeed();
+  if (!document.getElementById("view-teams").hidden) renderTeamManager();
+}
+
+function activeTeam() {
+  return myTeams.find((t) => t.id === activeTeamId) || null;
+}
+
+async function setActiveTeam(id) {
+  activeTeamId = id;
+  try {
+    teamOverview = await dbGetTeamOverview(id);
+  } catch (_) {
+    teamOverview = [];
+  }
+  renderFeed();
+  renderTeamManager();
+}
+
+// 12am / 4pm style labels for the "best time of day" insight (viewer-local).
+function hourLabel(h) {
+  const ap = h < 12 ? "am" : "pm";
+  let hr = h % 12;
+  if (hr === 0) hr = 12;
+  return hr + ap;
+}
+
+// Peak 2-hour selling window from real sold_at stamps, bucketed by LOCAL hour
+// (correct for the viewer's timezone). Needs a few sales to be meaningful.
+function bestSaleWindow(times) {
+  if (!times || times.length < 4) return null;
+  const buckets = new Array(24).fill(0);
+  times.forEach((t) => { buckets[new Date(t).getHours()]++; });
+  let best = -1, at = 0;
+  for (let h = 0; h < 24; h++) {
+    const sum = buckets[h] + buckets[(h + 1) % 24];
+    if (sum > best) { best = sum; at = h; }
+  }
+  if (best <= 0) return null;
+  return { start: at, end: (at + 2) % 24, count: best };
+}
+
+// ---- Team leaderboard (Feed) --------------------------------------------
+// Same look as the friends board, but scoped to the active team and titled
+// with the team name + a crown on the owner.
+let tlbRange = "today";      // today | week | all
+let tlbMetric = "stopbacks"; // stopbacks | sales
+
+function teamLeaderboardPost() {
+  const team = activeTeam();
+  const rows = teamOverview || [];
+  if (!team || !rows.length) return null;
+
+  const node = el(`
+    <article class="post post-leaderboard post-team">
+      <div class="post-head">
+        <span class="avatar avatar-team">🏢</span>
+        <div><span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking</span></div>
+      </div>
+      <div class="seg lb-seg">
+        <button type="button" class="seg-btn" data-v="today">Today</button>
+        <button type="button" class="seg-btn" data-v="week">This Week</button>
+        <button type="button" class="seg-btn" data-v="all">All Time</button>
+      </div>
+      <div class="lb-metric">
+        <button type="button" class="lb-m" data-v="stopbacks">Stop Backs</button>
+        <button type="button" class="lb-m" data-v="sales">Sales</button>
+      </div>
+      <div class="lb-rows"></div>
+      <p class="muted small lb-hint" hidden>Share code <strong>${escapeHtml(team.join_code || "")}</strong> to fill out the board. 🏁</p>
+    </article>`);
+
+  const paint = () => {
+    node.querySelectorAll(".lb-seg .seg-btn").forEach((b) =>
+      b.classList.toggle("active", b.dataset.v === tlbRange)
+    );
+    node.querySelectorAll(".lb-m").forEach((b) =>
+      b.classList.toggle("active", b.dataset.v === tlbMetric)
+    );
+
+    const other = tlbMetric === "stopbacks" ? "sales" : "stopbacks";
+    const sorted = [...rows].sort(
+      (a, b) =>
+        lbValue(b, tlbMetric, tlbRange) - lbValue(a, tlbMetric, tlbRange) ||
+        lbValue(b, other, tlbRange) - lbValue(a, other, tlbRange) ||
+        (a.display_name || a.username || "").localeCompare(b.display_name || b.username || "")
+    );
+
+    node.querySelector(".lb-rows").innerHTML = sorted
+      .map((r, i) => {
+        const who = r.is_self ? "You" : r.display_name || "@" + (r.username || "");
+        const crown = r.role === "owner" ? ` <span class="tm-crown" title="Team owner">👑</span>` : "";
+        const medal = i === 0 ? " lb-gold" : i === 1 ? " lb-silver" : i === 2 ? " lb-bronze" : "";
+        return `
+          <div class="lb-row${r.is_self ? " me" : ""}">
+            <span class="lb-rank${medal}">${i + 1}</span>
+            <span class="avatar ${r.is_self ? "avatar-you" : ""}" ${r.is_self ? "" : 'style="background:var(--green-deep)"'}>${initials(r.display_name || r.username || "?")}</span>
+            <span class="lb-name">${escapeHtml(who)}${crown}${r.current_streak > 0 ? ` <span class="lb-streak">🔥${r.current_streak}</span>` : ""}</span>
+            <span class="lb-stat${tlbMetric === "stopbacks" ? " primary" : ""}">${lbValue(r, "stopbacks", tlbRange)}<em>SB</em></span>
+            <span class="lb-stat${tlbMetric === "sales" ? " primary" : ""}">${lbValue(r, "sales", tlbRange)}<em>Sales</em></span>
+          </div>`;
+      })
+      .join("");
+    node.querySelector(".lb-hint").hidden = rows.length > 1;
+  };
+
+  node.querySelectorAll(".lb-seg .seg-btn").forEach((b) => (b.onclick = () => { tlbRange = b.dataset.v; paint(); }));
+  node.querySelectorAll(".lb-m").forEach((b) => (b.onclick = () => { tlbMetric = b.dataset.v; paint(); }));
+  paint();
+  return node;
+}
+
+// ---- Team insights (Feed) -----------------------------------------------
+// Data-driven patterns to help the crew improve — NOT selling advice
+// (per CLAUDE.md rule 6). Three angles: close rate vs team, pace/momentum,
+// and best time of day. Each row only shows when there's enough data.
+const TEAM_CLOSE_MIN = 5;   // decided closings (sales+missed) to rate someone
+
+function teamInsightsPost() {
+  const rows = teamOverview || [];
+  const me = rows.find((r) => r.is_self);
+  if (!me) return null;
+
+  const items = [];
+
+  // 1) Close rate vs the team (30-day window).
+  const decided = (r) => (r.sales_month || 0) + (r.missed_month || 0);
+  const closeRate = (r) => (decided(r) ? (r.sales_month || 0) / decided(r) : null);
+  const rated = rows.filter((r) => decided(r) >= TEAM_CLOSE_MIN);
+  if (rated.length && decided(me) >= TEAM_CLOSE_MIN) {
+    const mine = closeRate(me);
+    const avg = rated.reduce((s, r) => s + closeRate(r), 0) / rated.length;
+    const pct = (v) => Math.round(v * 100) + "%";
+    const rank = [...rated].sort((a, b) => closeRate(b) - closeRate(a)).findIndex((r) => r.is_self) + 1;
+    let detail;
+    if (mine >= avg) detail = `Your ${pct(mine)} beats the team's ${pct(avg)} average${rank === 1 ? " — #1 on the crew 🥇" : ""}.`;
+    else detail = `You're at ${pct(mine)} vs the team's ${pct(avg)} average — room to climb.`;
+    items.push({ icon: "🎯", label: "Close rate", detail });
+  }
+
+  // 2) Pace & momentum (this week's effort vs last week's).
+  const change = (r) => {
+    const prev = r.stopbacks_prev_week || 0;
+    if (prev <= 0) return null;
+    return ((r.stopbacks_week || 0) - prev) / prev;
+  };
+  const myChange = change(me);
+  if (myChange !== null && Math.abs(myChange) >= 0.1) {
+    const p = Math.round(Math.abs(myChange) * 100);
+    items.push({
+      icon: myChange > 0 ? "📈" : "📉",
+      label: "Your momentum",
+      detail: myChange > 0
+        ? `Stop backs up ${p}% vs last week — you're heating up.`
+        : `Stop backs down ${p}% vs last week — time to push the doors.`,
+    });
+  } else if (rows.length > 1) {
+    // No personal signal? Spotlight the crew's biggest mover instead.
+    const movers = rows.map((r) => ({ r, c: change(r) })).filter((m) => m.c !== null && m.c > 0.1);
+    if (movers.length) {
+      const top = movers.sort((a, b) => b.c - a.c)[0];
+      const who = top.r.is_self ? "You're" : (top.r.display_name || "@" + top.r.username) + " is";
+      items.push({ icon: "🚀", label: "On the rise", detail: `${escapeHtml(who)} up ${Math.round(top.c * 100)}% in stop backs this week.` });
+    }
+  }
+
+  // 3) Best time of day (from real sale timestamps, viewer-local hours).
+  const myWindow = bestSaleWindow(me.sale_times_month);
+  if (myWindow) {
+    items.push({
+      icon: "⏰",
+      label: "Your window",
+      detail: `You close most between ${hourLabel(myWindow.start)}–${hourLabel(myWindow.end)}. Load your route there.`,
+    });
+  } else {
+    // Not enough of the rep's own sales? Show the team's peak window.
+    const allTimes = rows.flatMap((r) => r.sale_times_month || []);
+    const teamWindow = bestSaleWindow(allTimes);
+    if (teamWindow)
+      items.push({ icon: "⏰", label: "Team's window", detail: `The crew closes most between ${hourLabel(teamWindow.start)}–${hourLabel(teamWindow.end)}.` });
+  }
+
+  if (!items.length) return null;
+
+  return el(`
+    <article class="post post-insight post-team-insight">
+      <div class="post-head">
+        <span class="avatar avatar-ai">🧠</span>
+        <div><span class="post-author">Team Insights</span><span class="post-tag">Patterns to grow on</span></div>
+      </div>
+      <div class="ti-rows">
+        ${items.map((it) => `
+          <div class="ti-row">
+            <span class="ti-icon">${it.icon}</span>
+            <div class="ti-text"><strong>${it.label}</strong><span class="muted small">${it.detail}</span></div>
+          </div>`).join("")}
+      </div>
+    </article>`);
+}
+
+// ---- Team manager (Profile → Team view) ---------------------------------
+function renderTeamManager() {
+  const wrap = document.getElementById("teams-current");
+  if (!wrap) return;
+  if (!myTeams.length) {
+    wrap.innerHTML = `<div class="card"><p class="empty-hint" style="margin:0">You're not on a team yet. Join one with a code below, or create your own.</p></div>`;
+    return;
+  }
+
+  wrap.innerHTML = myTeams
+    .map((t) => {
+      const isActive = t.id === activeTeamId;
+      const roster = isActive
+        ? (teamOverview || [])
+            .map((m) => {
+              const who = m.is_self ? "You" : m.display_name || "@" + (m.username || "");
+              const crown = m.role === "owner" ? ` <span class="tm-crown">👑</span>` : "";
+              const canRemove = t.is_owner && !m.is_self;
+              return `
+                <li class="tm-row">
+                  <span class="avatar ${m.is_self ? "avatar-you" : ""}" ${m.is_self ? "" : 'style="background:var(--green-deep)"'}>${initials(m.display_name || m.username || "?")}</span>
+                  <span class="tm-name">${escapeHtml(who)}${crown}</span>
+                  ${canRemove ? `<button type="button" class="linkish tm-remove" data-team="${t.id}" data-user="${m.user_id}">Remove</button>` : ""}
+                </li>`;
+            })
+            .join("")
+        : "";
+      return `
+        <div class="card team-card${isActive ? " team-active" : ""}">
+          <div class="team-card-head">
+            <h2 class="card-title">${escapeHtml(t.name)}${t.is_owner ? ` <span class="tm-crown" title="You own this team">👑</span>` : ""}</h2>
+            ${isActive ? `<span class="team-badge">On the Feed</span>` : `<button type="button" class="linkish set-active" data-team="${t.id}">Show on Feed</button>`}
+          </div>
+          <div class="team-code-row">
+            <span class="muted small">Invite code</span>
+            <button type="button" class="code-chip" data-code="${escapeHtml(t.join_code || "")}" title="Tap to copy">${escapeHtml(t.join_code || "")} <span class="code-copy">Copy</span></button>
+          </div>
+          <p class="muted small">${t.member_count} member${t.member_count === 1 ? "" : "s"}</p>
+          ${isActive ? `<ul class="team-members">${roster}</ul>` : ""}
+          <button type="button" class="ghost full ${t.is_owner ? "danger-ghost" : ""}" data-team="${t.id}" data-act="${t.is_owner ? "delete" : "leave"}">
+            ${t.is_owner ? "Delete team" : "Leave team"}
+          </button>
+        </div>`;
+    })
+    .join("");
+
+  // Wire the freshly-built controls.
+  wrap.querySelectorAll(".code-chip").forEach((b) =>
+    (b.onclick = () => copyCode(b.dataset.code, b))
+  );
+  wrap.querySelectorAll(".set-active").forEach((b) =>
+    (b.onclick = () => setActiveTeam(b.dataset.team))
+  );
+  wrap.querySelectorAll(".tm-remove").forEach((b) =>
+    (b.onclick = () => onRemoveMember(b.dataset.team, b.dataset.user))
+  );
+  wrap.querySelectorAll("[data-act]").forEach((b) =>
+    (b.onclick = () => (b.dataset.act === "delete" ? onDeleteTeam(b.dataset.team) : onLeaveTeam(b.dataset.team)))
+  );
+}
+
+function copyCode(code, btn) {
+  if (!code) return;
+  navigator.clipboard?.writeText(code).then(
+    () => { toast("Code copied — text it to your reps 📋"); if (btn) { btn.classList.add("copied"); setTimeout(() => btn.classList.remove("copied"), 1200); } },
+    () => toast("Couldn't copy — code is " + code)
+  );
+}
+
+async function onCreateTeam(e) {
+  e.preventDefault();
+  const input = document.getElementById("team-create-name");
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    const team = await dbCreateTeam(name);
+    input.value = "";
+    await refreshTeams();
+    if (team) await setActiveTeam(team.id);
+    toast(`Team created — code ${team ? team.join_code : ""} 🎉`);
+  } catch (err) {
+    dbFail("Couldn't create team")(err);
+  }
+}
+
+async function onJoinTeam(e) {
+  e.preventDefault();
+  const input = document.getElementById("team-join-code");
+  const code = input.value.trim();
+  if (!code) return;
+  try {
+    const team = await dbJoinTeam(code);
+    input.value = "";
+    await refreshTeams();
+    if (team) await setActiveTeam(team.id);
+    toast(`Joined ${team ? team.name : "the team"} 🤝`);
+  } catch (err) {
+    toast("No team found for that code");
+  }
+}
+
+async function onLeaveTeam(teamId) {
+  if (!confirm("Leave this team? You'll drop off its rankings.")) return;
+  try {
+    await dbLeaveTeam(teamId);
+    if (activeTeamId === teamId) activeTeamId = null;
+    await refreshTeams();
+    toast("Left the team");
+  } catch (err) {
+    dbFail("Couldn't leave")(err);
+  }
+}
+
+async function onDeleteTeam(teamId) {
+  if (!confirm("Delete this team for everyone? This can't be undone.")) return;
+  try {
+    await dbDeleteTeam(teamId);
+    if (activeTeamId === teamId) activeTeamId = null;
+    await refreshTeams();
+    toast("Team deleted");
+  } catch (err) {
+    dbFail("Couldn't delete")(err);
+  }
+}
+
+async function onRemoveMember(teamId, userId) {
+  if (!confirm("Remove this member from the team?")) return;
+  try {
+    await dbRemoveMember(teamId, userId);
+    await refreshTeams();
+    toast("Member removed");
+  } catch (err) {
+    dbFail("Couldn't remove member")(err);
+  }
+}
+
 // ---- Weekly Recognition ---------------------------------------------------
 // Live leaders across this week's five awards. Needs a crew of 2+.
 const RECOGNITION_MIN_CONTACTS_WEEK = 15; // close-rate award eligibility
@@ -1240,6 +1596,8 @@ function renderFeed() {
     goalPost(animate),
     pacePost(),
     hitListPost(),
+    teamLeaderboardPost(),
+    teamInsightsPost(),
     ...interleave(mine, theirs),
     insightPost(),
     leaderboardPost(),
@@ -2087,6 +2445,7 @@ async function startApp() {
     })
     .catch((err) => console.error("[StopBack] Couldn't backfill records:", err));
   refreshFriendsOverview(); // pull the team feed's achievements
+  refreshTeams();           // pull company-team rankings + insights
 }
 
 // Wires DOM event listeners exactly once, before auth decides which screen
@@ -2152,7 +2511,7 @@ function wireEvents() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       switchView(btn.dataset.view);
-      if (btn.dataset.view === "feed") refreshFriendsOverview(); // fresh team stats
+      if (btn.dataset.view === "feed") { refreshFriendsOverview(); refreshTeams(); } // fresh team stats
     });
   });
 
@@ -2209,6 +2568,16 @@ function wireEvents() {
     searchFriends(document.getElementById("friend-search").value);
   });
   document.getElementById("friend-search").addEventListener("input", debounce((e) => searchFriends(e.target.value), 350));
+
+  // Teams (company crews)
+  document.getElementById("open-team").addEventListener("click", () => {
+    switchView("teams");
+    renderTeamManager(); // paint what we have, then refresh in the background
+    refreshTeams();
+  });
+  document.getElementById("teams-back").addEventListener("click", () => switchView("profile"));
+  document.getElementById("team-create-form").addEventListener("submit", onCreateTeam);
+  document.getElementById("team-join-form").addEventListener("submit", onJoinTeam);
 }
 
 // Boot: wire listeners once, then hand off to the auth layer, which routes to
