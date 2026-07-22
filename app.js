@@ -1018,13 +1018,40 @@ function pacePost() {
 
 // ---- Friends leaderboard -----------------------------------------------
 // Reads the already-loaded friendsOverview (today/week/all-time counts +
-// streaks). Tab clicks repaint only this card's rows — no full feed
-// re-render, so scroll position is untouched.
+// streaks). Range clicks repaint only this card's rows — no full feed
+// re-render, so scroll position is untouched. Both Stop Backs and Sales are
+// always shown with an effort-first sort, so there's no metric toggle.
 let lbRange = "today";      // today | week | all
-let lbMetric = "stopbacks"; // stopbacks | sales
 
 function lbValue(row, metric, range) {
   return row[metric + "_" + (range === "all" ? "all" : range)] || 0;
+}
+
+// Effort-first ranking: stop backs, then sales, then name. Shared by the
+// friends + team boards.
+function rankRows(rows, range) {
+  return [...rows].sort(
+    (a, b) =>
+      lbValue(b, "stopbacks", range) - lbValue(a, "stopbacks", range) ||
+      lbValue(b, "sales", range) - lbValue(a, "sales", range) ||
+      (a.display_name || a.username || "").localeCompare(b.display_name || b.username || "")
+  );
+}
+
+// One leaderboard row's markup — always shows BOTH stats (SB is the primary
+// effort metric). Shared by the friends + team boards.
+function lbRowHtml(r, i, range) {
+  const who = r.is_self ? "You" : r.display_name || "@" + (r.username || "");
+  const crown = r.role === "owner" ? ` <span class="tm-crown" title="Team owner">👑</span>` : "";
+  const medal = i === 0 ? " lb-gold" : i === 1 ? " lb-silver" : i === 2 ? " lb-bronze" : "";
+  return `
+    <div class="lb-row${r.is_self ? " me" : ""}">
+      <span class="lb-rank${medal}">${i + 1}</span>
+      <span class="avatar ${r.is_self ? "avatar-you" : ""}" ${r.is_self ? "" : 'style="background:var(--green-deep)"'}>${initials(r.display_name || r.username || "?")}</span>
+      <span class="lb-name">${escapeHtml(who)}${crown}${r.current_streak > 0 ? ` <span class="lb-streak">🔥${r.current_streak}</span>` : ""}</span>
+      <span class="lb-stat primary">${lbValue(r, "stopbacks", range)}<em>SB</em></span>
+      <span class="lb-stat">${lbValue(r, "sales", range)}<em>Sales</em></span>
+    </div>`;
 }
 
 function leaderboardPost() {
@@ -1042,10 +1069,6 @@ function leaderboardPost() {
         <button type="button" class="seg-btn" data-v="week">This Week</button>
         <button type="button" class="seg-btn" data-v="all">All Time</button>
       </div>
-      <div class="lb-metric">
-        <button type="button" class="lb-m" data-v="stopbacks">Stop Backs</button>
-        <button type="button" class="lb-m" data-v="sales">Sales</button>
-      </div>
       <div class="lb-rows"></div>
       <p class="muted small lb-hint" hidden>Add friends to make this a race. 🏁</p>
     </article>`);
@@ -1054,37 +1077,13 @@ function leaderboardPost() {
     node.querySelectorAll(".lb-seg .seg-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.v === lbRange)
     );
-    node.querySelectorAll(".lb-m").forEach((b) =>
-      b.classList.toggle("active", b.dataset.v === lbMetric)
-    );
-
-    const other = lbMetric === "stopbacks" ? "sales" : "stopbacks";
-    const sorted = [...rows].sort(
-      (a, b) =>
-        lbValue(b, lbMetric, lbRange) - lbValue(a, lbMetric, lbRange) ||
-        lbValue(b, other, lbRange) - lbValue(a, other, lbRange) ||
-        (a.display_name || a.username || "").localeCompare(b.display_name || b.username || "")
-    );
-
-    node.querySelector(".lb-rows").innerHTML = sorted
-      .map((r, i) => {
-        const who = r.is_self ? "You" : r.display_name || "@" + (r.username || "");
-        const medal = i === 0 ? " lb-gold" : i === 1 ? " lb-silver" : i === 2 ? " lb-bronze" : "";
-        return `
-          <div class="lb-row${r.is_self ? " me" : ""}">
-            <span class="lb-rank${medal}">${i + 1}</span>
-            <span class="avatar ${r.is_self ? "avatar-you" : ""}" ${r.is_self ? "" : 'style="background:var(--green-deep)"'}>${initials(r.display_name || r.username || "?")}</span>
-            <span class="lb-name">${escapeHtml(who)}${r.current_streak > 0 ? ` <span class="lb-streak">🔥${r.current_streak}</span>` : ""}</span>
-            <span class="lb-stat${lbMetric === "stopbacks" ? " primary" : ""}">${lbValue(r, "stopbacks", lbRange)}<em>SB</em></span>
-            <span class="lb-stat${lbMetric === "sales" ? " primary" : ""}">${lbValue(r, "sales", lbRange)}<em>Sales</em></span>
-          </div>`;
-      })
+    node.querySelector(".lb-rows").innerHTML = rankRows(rows, lbRange)
+      .map((r, i) => lbRowHtml(r, i, lbRange))
       .join("");
     node.querySelector(".lb-hint").hidden = rows.length > 1;
   };
 
   node.querySelectorAll(".lb-seg .seg-btn").forEach((b) => (b.onclick = () => { lbRange = b.dataset.v; paint(); }));
-  node.querySelectorAll(".lb-m").forEach((b) => (b.onclick = () => { lbMetric = b.dataset.v; paint(); }));
   paint();
   return node;
 }
@@ -1152,10 +1151,17 @@ function bestSaleWindow(times) {
 }
 
 // ---- Team leaderboard (Feed) --------------------------------------------
-// Same look as the friends board, but scoped to the active team and titled
-// with the team name + a crown on the owner.
+// Same look as the friends board, but scoped to the active team. The header
+// carries an Insights button (opens the trends modal) and the whole card opens
+// the Team Info view; the owner's crown shows on their row.
 let tlbRange = "today";      // today | week | all
-let tlbMetric = "stopbacks"; // stopbacks | sales
+
+// Team avatar: the uploaded company logo if present, else the default 🏢.
+function teamLogoHtml(team, cls) {
+  if (team && team.logo_url)
+    return `<span class="${cls} has-logo"><img src="${escapeHtml(team.logo_url)}" alt="${escapeHtml(team.name || "Team")} logo"></span>`;
+  return `<span class="${cls}">🏢</span>`;
+}
 
 function teamLeaderboardPost() {
   const team = activeTeam();
@@ -1164,18 +1170,17 @@ function teamLeaderboardPost() {
 
   const node = el(`
     <article class="post post-leaderboard post-team">
-      <div class="post-head">
-        <span class="avatar avatar-team">🏢</span>
-        <div><span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking</span></div>
+      <div class="post-head team-post-head">
+        ${teamLogoHtml(team, "avatar avatar-team")}
+        <button type="button" class="team-title-btn" aria-label="Open ${escapeHtml(team.name)} team info">
+          <span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking · tap for info</span>
+        </button>
+        <button type="button" class="team-insights-btn">📊 Insights</button>
       </div>
       <div class="seg lb-seg">
         <button type="button" class="seg-btn" data-v="today">Today</button>
         <button type="button" class="seg-btn" data-v="week">This Week</button>
         <button type="button" class="seg-btn" data-v="all">All Time</button>
-      </div>
-      <div class="lb-metric">
-        <button type="button" class="lb-m" data-v="stopbacks">Stop Backs</button>
-        <button type="button" class="lb-m" data-v="sales">Sales</button>
       </div>
       <div class="lb-rows"></div>
       <p class="muted small lb-hint" hidden>Share code <strong>${escapeHtml(team.join_code || "")}</strong> to fill out the board. 🏁</p>
@@ -1185,52 +1190,35 @@ function teamLeaderboardPost() {
     node.querySelectorAll(".lb-seg .seg-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.v === tlbRange)
     );
-    node.querySelectorAll(".lb-m").forEach((b) =>
-      b.classList.toggle("active", b.dataset.v === tlbMetric)
-    );
-
-    const other = tlbMetric === "stopbacks" ? "sales" : "stopbacks";
-    const sorted = [...rows].sort(
-      (a, b) =>
-        lbValue(b, tlbMetric, tlbRange) - lbValue(a, tlbMetric, tlbRange) ||
-        lbValue(b, other, tlbRange) - lbValue(a, other, tlbRange) ||
-        (a.display_name || a.username || "").localeCompare(b.display_name || b.username || "")
-    );
-
-    node.querySelector(".lb-rows").innerHTML = sorted
-      .map((r, i) => {
-        const who = r.is_self ? "You" : r.display_name || "@" + (r.username || "");
-        const crown = r.role === "owner" ? ` <span class="tm-crown" title="Team owner">👑</span>` : "";
-        const medal = i === 0 ? " lb-gold" : i === 1 ? " lb-silver" : i === 2 ? " lb-bronze" : "";
-        return `
-          <div class="lb-row${r.is_self ? " me" : ""}">
-            <span class="lb-rank${medal}">${i + 1}</span>
-            <span class="avatar ${r.is_self ? "avatar-you" : ""}" ${r.is_self ? "" : 'style="background:var(--green-deep)"'}>${initials(r.display_name || r.username || "?")}</span>
-            <span class="lb-name">${escapeHtml(who)}${crown}${r.current_streak > 0 ? ` <span class="lb-streak">🔥${r.current_streak}</span>` : ""}</span>
-            <span class="lb-stat${tlbMetric === "stopbacks" ? " primary" : ""}">${lbValue(r, "stopbacks", tlbRange)}<em>SB</em></span>
-            <span class="lb-stat${tlbMetric === "sales" ? " primary" : ""}">${lbValue(r, "sales", tlbRange)}<em>Sales</em></span>
-          </div>`;
-      })
+    node.querySelector(".lb-rows").innerHTML = rankRows(rows, tlbRange)
+      .map((r, i) => lbRowHtml(r, i, tlbRange))
       .join("");
     node.querySelector(".lb-hint").hidden = rows.length > 1;
   };
 
-  node.querySelectorAll(".lb-seg .seg-btn").forEach((b) => (b.onclick = () => { tlbRange = b.dataset.v; paint(); }));
-  node.querySelectorAll(".lb-m").forEach((b) => (b.onclick = () => { tlbMetric = b.dataset.v; paint(); }));
+  node.querySelectorAll(".lb-seg .seg-btn").forEach((b) =>
+    (b.onclick = (e) => { e.stopPropagation(); tlbRange = b.dataset.v; paint(); }));
+  node.querySelector(".team-insights-btn").onclick = (e) => { e.stopPropagation(); openTeamInsights(); };
+  node.querySelector(".team-title-btn").onclick = (e) => { e.stopPropagation(); openTeamInfo(team.id); };
+  // Clicking the card background (but not a control or a member row) opens info.
+  node.addEventListener("click", (e) => {
+    if (e.target.closest("button, a, input, .lb-row")) return;
+    openTeamInfo(team.id);
+  });
+
   paint();
   return node;
 }
 
-// ---- Team insights (Feed) -----------------------------------------------
+// ---- Team insights (modal, opened from the board's Insights button) -----
 // Data-driven patterns to help the crew improve — NOT selling advice
 // (per CLAUDE.md rule 6). Three angles: close rate vs team, pace/momentum,
-// and best time of day. Each row only shows when there's enough data.
+// best time of day. Each row only appears when there's enough data.
 const TEAM_CLOSE_MIN = 5;   // decided closings (sales+missed) to rate someone
 
-function teamInsightsPost() {
-  const rows = teamOverview || [];
+function computeTeamInsights(rows) {
   const me = rows.find((r) => r.is_self);
-  if (!me) return null;
+  if (!me) return [];
 
   const items = [];
 
@@ -1291,22 +1279,157 @@ function teamInsightsPost() {
       items.push({ icon: "⏰", label: "Team's window", detail: `The crew closes most between ${hourLabel(teamWindow.start)}–${hourLabel(teamWindow.end)}.` });
   }
 
-  if (!items.length) return null;
+  return items;
+}
 
-  return el(`
-    <article class="post post-insight post-team-insight">
-      <div class="post-head">
-        <span class="avatar avatar-ai">🧠</span>
-        <div><span class="post-author">Team Insights</span><span class="post-tag">Patterns to grow on</span></div>
-      </div>
-      <div class="ti-rows">
-        ${items.map((it) => `
-          <div class="ti-row">
-            <span class="ti-icon">${it.icon}</span>
-            <div class="ti-text"><strong>${it.label}</strong><span class="muted small">${it.detail}</span></div>
-          </div>`).join("")}
-      </div>
-    </article>`);
+function openTeamInsights() {
+  const items = computeTeamInsights(teamOverview || []);
+  const body = document.getElementById("tin-body");
+  body.innerHTML = items.length
+    ? items.map((it) => `
+        <div class="ti-row">
+          <span class="ti-icon">${it.icon}</span>
+          <div class="ti-text"><strong>${it.label}</strong><span class="muted small">${it.detail}</span></div>
+        </div>`).join("")
+    : `<p class="empty-hint" style="margin:0">Not enough data yet — keep logging and team insights will show up here. 📈</p>`;
+  openModal("team-insights-modal");
+}
+
+// ---- Modal helpers ------------------------------------------------------
+function openModal(id) { const m = document.getElementById(id); if (m) m.hidden = false; }
+function closeModal(id) { const m = document.getElementById(id); if (m) m.hidden = true; }
+
+// ---- Team Info view (modal) ---------------------------------------------
+// Opened by clicking the team card/name. Shows name, logo, description, owner,
+// and the full member directory with emails (server only returns these to
+// members of the same team).
+async function openTeamInfo(teamId) {
+  const team = myTeams.find((t) => t.id === teamId);
+  if (!team) return;
+
+  document.getElementById("ti-title").textContent = team.name;
+  const logo = document.getElementById("ti-logo");
+  logo.classList.toggle("has-logo", !!team.logo_url);
+  logo.innerHTML = team.logo_url
+    ? `<img src="${escapeHtml(team.logo_url)}" alt="${escapeHtml(team.name)} logo">` : "🏢";
+  const desc = document.getElementById("ti-desc");
+  desc.textContent = team.description || "No description yet.";
+  desc.classList.toggle("muted", !team.description);
+
+  const list = document.getElementById("ti-members");
+  const ownerLine = document.getElementById("ti-owner");
+  const empty = document.getElementById("ti-empty");
+  empty.hidden = true;
+  ownerLine.textContent = "";
+  list.innerHTML = `<li class="muted small">Loading members…</li>`;
+  openModal("team-info-modal");
+
+  let members = [];
+  try { members = await dbGetTeamMembers(teamId); }
+  catch (_) { list.innerHTML = `<li class="muted small">Couldn't load members.</li>`; return; }
+
+  const owner = members.find((m) => m.role === "owner");
+  ownerLine.textContent = owner
+    ? `Owned by ${owner.is_self ? "you" : (owner.display_name || "@" + owner.username)}`
+    : "";
+  list.innerHTML = members.map((m) => {
+    const name = m.display_name || m.username || "Member";
+    const badge = m.role === "owner" ? `<span class="owner-badge">Owner</span>` : "";
+    const meTag = m.is_self ? `<span class="muted small"> · you</span>` : "";
+    return `
+      <li class="ti-member">
+        <span class="avatar" style="background:var(--green-deep)">${initials(name)}</span>
+        <span class="ti-member-info">
+          <span class="ti-member-name">${escapeHtml(name)}${badge}${meTag}</span>
+          <span class="muted small">${escapeHtml(m.email || "")}</span>
+        </span>
+      </li>`;
+  }).join("");
+  empty.hidden = members.length > 1;   // only the owner so far → show the hint
+}
+
+// ---- Edit Team (owner only) ---------------------------------------------
+// editLogoState: {file} pending upload | "remove" | null (logo unchanged).
+let editLogoState = null;
+
+function setEditLogoPreview(url) {
+  const p = document.getElementById("te-logo-preview");
+  if (url) { p.innerHTML = `<img src="${escapeHtml(url)}" alt="Logo preview">`; p.classList.add("has-logo"); }
+  else { p.innerHTML = "🏢"; p.classList.remove("has-logo"); }
+}
+
+function openEditTeam(teamId) {
+  const team = myTeams.find((t) => t.id === teamId);
+  if (!team || !team.is_owner) return;   // frontend guard (server also enforces)
+  editLogoState = null;
+  document.getElementById("te-id").value = team.id;
+  document.getElementById("te-name").value = team.name || "";
+  document.getElementById("te-desc").value = team.description || "";
+  document.getElementById("te-desc-count").textContent = (team.description || "").length;
+  setEditLogoPreview(team.logo_url);
+  document.getElementById("te-logo-remove").hidden = !team.logo_url;
+  document.getElementById("te-error").hidden = true;
+  openModal("team-edit-modal");
+}
+
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;               // 2MB
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+function onLogoInputChange(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const err = document.getElementById("te-error");
+  if (!LOGO_TYPES.includes(file.type)) {
+    err.textContent = "Please choose a PNG, JPG, or WebP image.";
+    err.hidden = false; e.target.value = ""; return;
+  }
+  if (file.size > LOGO_MAX_BYTES) {
+    err.textContent = "That image is too large (max 2MB).";
+    err.hidden = false; e.target.value = ""; return;
+  }
+  err.hidden = true;
+  editLogoState = { file };
+  setEditLogoPreview(URL.createObjectURL(file));   // instant preview
+  document.getElementById("te-logo-remove").hidden = false;
+}
+
+function onRemoveLogoClick() {
+  if (!confirm("Remove the team logo?")) return;
+  editLogoState = "remove";
+  setEditLogoPreview(null);
+  document.getElementById("te-logo-remove").hidden = true;
+  document.getElementById("te-logo-input").value = "";
+}
+
+async function submitEditTeam(e) {
+  e.preventDefault();
+  const id = document.getElementById("te-id").value;
+  const name = document.getElementById("te-name").value.trim();
+  const description = document.getElementById("te-desc").value.trim();
+  const err = document.getElementById("te-error");
+  const saveBtn = document.getElementById("te-save");
+
+  if (!name) { err.textContent = "Team name can't be blank."; err.hidden = false; return; }
+  if (name.length > 60) { err.textContent = "Team name is too long (max 60)."; err.hidden = false; return; }
+  if (description.length > 500) { err.textContent = "Description is too long (max 500)."; err.hidden = false; return; }
+  err.hidden = true;
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving…";
+  try {
+    await dbUpdateTeam(id, { name, description });
+    if (editLogoState && editLogoState.file) await dbUploadTeamLogo(id, editLogoState.file);
+    else if (editLogoState === "remove") await dbRemoveTeamLogo(id);
+    await refreshTeams();          // repaints board + manager with new info
+    closeModal("team-edit-modal");
+    toast("Team updated ✓");
+  } catch (e2) {
+    err.textContent = (e2 && e2.message) || "Couldn't save changes. Try again.";
+    err.hidden = false;
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Save";
+  }
 }
 
 // ---- Team manager (Profile → Team view) ---------------------------------
@@ -1339,8 +1462,14 @@ function renderTeamManager() {
       return `
         <div class="card team-card${isActive ? " team-active" : ""}">
           <div class="team-card-head">
-            <h2 class="card-title">${escapeHtml(t.name)}${t.is_owner ? ` <span class="tm-crown" title="You own this team">👑</span>` : ""}</h2>
-            ${isActive ? `<span class="team-badge">On the Feed</span>` : `<button type="button" class="linkish set-active" data-team="${t.id}">Show on Feed</button>`}
+            <div class="team-card-title">
+              ${teamLogoHtml(t, "team-logo-sm")}
+              <h2 class="card-title" style="margin:0">${escapeHtml(t.name)}${t.is_owner ? ` <span class="tm-crown" title="You own this team">👑</span>` : ""}</h2>
+            </div>
+            <div class="team-head-actions">
+              ${t.is_owner ? `<button type="button" class="linkish edit-team" data-team="${t.id}">Edit</button>` : ""}
+              ${isActive ? `<span class="team-badge">On the Feed</span>` : `<button type="button" class="linkish set-active" data-team="${t.id}">Show on Feed</button>`}
+            </div>
           </div>
           <div class="team-code-row">
             <span class="muted small">Invite code</span>
@@ -1361,6 +1490,9 @@ function renderTeamManager() {
   );
   wrap.querySelectorAll(".set-active").forEach((b) =>
     (b.onclick = () => setActiveTeam(b.dataset.team))
+  );
+  wrap.querySelectorAll(".edit-team").forEach((b) =>
+    (b.onclick = () => openEditTeam(b.dataset.team))
   );
   wrap.querySelectorAll(".tm-remove").forEach((b) =>
     (b.onclick = () => onRemoveMember(b.dataset.team, b.dataset.user))
@@ -1597,7 +1729,6 @@ function renderFeed() {
     pacePost(),
     hitListPost(),
     teamLeaderboardPost(),
-    teamInsightsPost(),
     ...interleave(mine, theirs),
     insightPost(),
     leaderboardPost(),
@@ -2578,6 +2709,36 @@ function wireEvents() {
   document.getElementById("teams-back").addEventListener("click", () => switchView("profile"));
   document.getElementById("team-create-form").addEventListener("submit", onCreateTeam);
   document.getElementById("team-join-form").addEventListener("submit", onJoinTeam);
+
+  // Team Info / Insights / Edit modals: close buttons + backdrop clicks.
+  ["team-info-modal", "team-insights-modal", "team-edit-modal"].forEach((mid) =>
+    document.getElementById(mid).addEventListener("click", (e) => {
+      if (e.target.id === mid) closeModal(mid);
+    })
+  );
+  document.getElementById("ti-close").addEventListener("click", () => closeModal("team-info-modal"));
+  document.getElementById("ti-x").addEventListener("click", () => closeModal("team-info-modal"));
+  document.getElementById("tin-close").addEventListener("click", () => closeModal("team-insights-modal"));
+  document.getElementById("tin-x").addEventListener("click", () => closeModal("team-insights-modal"));
+  document.getElementById("te-x").addEventListener("click", () => closeModal("team-edit-modal"));
+  document.getElementById("te-cancel").addEventListener("click", () => closeModal("team-edit-modal"));
+
+  // Edit Team form: logo picker, remove, live description counter, submit.
+  document.getElementById("team-edit-form").addEventListener("submit", submitEditTeam);
+  document.getElementById("te-logo-btn").addEventListener("click", () =>
+    document.getElementById("te-logo-input").click()
+  );
+  document.getElementById("te-logo-input").addEventListener("change", onLogoInputChange);
+  document.getElementById("te-logo-remove").addEventListener("click", onRemoveLogoClick);
+  document.getElementById("te-desc").addEventListener("input", (e) => {
+    document.getElementById("te-desc-count").textContent = e.target.value.length;
+  });
+
+  // Escape closes any open modal (including the edit-lead modal).
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".modal-overlay:not([hidden])").forEach((m) => (m.hidden = true));
+  });
 }
 
 // Boot: wire listeners once, then hand off to the auth layer, which routes to

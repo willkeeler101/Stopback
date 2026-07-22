@@ -982,18 +982,6 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 
 /* ===== Friends leaderboard ===== */
 .post-leaderboard .lb-seg { margin: var(--sp-3) 0 var(--sp-2); }
-.lb-metric { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-2); }
-.lb-m {
-  flex: 1;
-  padding: 0.45rem;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  color: var(--ink-soft);
-  font-weight: 700; font-size: 0.82rem;
-  cursor: pointer;
-}
-.lb-m.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 
 .lb-row {
   display: flex; align-items: center; gap: var(--sp-3);
@@ -1145,3 +1133,79 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .tm-remove:hover { color: var(--red-deep); }
 .danger-ghost { color: var(--red); border-color: rgba(155, 34, 38, 0.35); }
 .danger-ghost:hover { border-color: var(--red); color: var(--red-deep); }
+
+/* ===== Teams: logos, info + edit (migration 6) ===== */
+/* Logo-aware avatar: fills the circle with the uploaded image, else emoji. */
+.avatar.has-logo, .team-logo-lg.has-logo, .team-logo-sm.has-logo { padding: 0; overflow: hidden; }
+.avatar.has-logo img, .team-logo-lg.has-logo img, .team-logo-sm.has-logo img {
+  width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block;
+}
+
+/* Team board header: logo + tappable title + Insights button on the right. */
+.team-post-head { display: flex; align-items: center; gap: var(--sp-3); }
+.team-title-btn {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 1px; background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+}
+.team-title-btn .post-author { text-decoration: underline; text-decoration-color: transparent; }
+.team-title-btn:hover .post-author { text-decoration-color: currentColor; }
+.team-title-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
+.team-insights-btn {
+  flex: none; font-size: var(--fs-caption); font-weight: 700;
+  color: var(--amber-deep); background: rgba(185, 121, 31, 0.14);
+  border: 1px solid var(--amber); border-radius: 999px;
+  padding: var(--sp-1) var(--sp-3); cursor: pointer; white-space: nowrap;
+}
+.team-insights-btn:hover { background: rgba(185, 121, 31, 0.22); }
+.post-team { cursor: pointer; }
+.post-team .lb-row, .post-team .seg, .post-team button { cursor: default; }
+.post-team .seg-btn, .post-team .team-insights-btn, .post-team .team-title-btn { cursor: pointer; }
+
+/* Manage-team card header: logo + name on the left, Edit / status on right. */
+.team-card-title { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.team-head-actions { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
+.team-logo-sm {
+  flex: none; width: 40px; height: 40px; border-radius: var(--radius-sm);
+  display: grid; place-items: center; font-size: 1.2rem; background: var(--paper-3);
+}
+
+/* Big logo used in the info + edit modals. */
+.team-logo-lg {
+  flex: none; width: 64px; height: 64px; border-radius: var(--radius);
+  display: grid; place-items: center; font-size: 2rem; background: var(--paper-3);
+}
+
+/* Modal close (✕) in the top-right corner. */
+.modal { position: relative; }
+.modal-x {
+  position: absolute; top: 0.6rem; right: 0.6rem;
+  width: 32px; height: 32px; border-radius: 999px;
+  border: none; background: var(--paper-3); color: var(--ink-soft);
+  font-size: 0.95rem; cursor: pointer; line-height: 1;
+}
+.modal-x:hover { background: var(--line); color: var(--ink); }
+
+/* Team Info modal */
+.ti-head { display: flex; align-items: center; gap: var(--sp-3); margin: 0.2rem 0 var(--sp-3); padding-right: 2rem; }
+.ti-desc { margin-bottom: var(--sp-4); line-height: 1.5; }
+.ti-subhead { font-family: var(--font-body); font-size: var(--fs-sub); font-weight: 800; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--sp-2); }
+.ti-members { list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); margin: 0; }
+.ti-member { display: flex; align-items: center; gap: var(--sp-3); }
+.ti-member-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ti-member-info .muted { overflow: hidden; text-overflow: ellipsis; }
+.ti-member-name { font-weight: 700; display: flex; align-items: center; gap: var(--sp-2); }
+.owner-badge {
+  font-size: var(--fs-caption); font-weight: 800; letter-spacing: 0.03em;
+  color: var(--gold-deep); background: rgba(201, 162, 39, 0.16);
+  border: 1px solid var(--gold); border-radius: 999px; padding: 0 var(--sp-2);
+}
+
+/* Edit Team modal */
+.te-logo-row { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-2); }
+.te-logo-actions { display: flex; flex-direction: column; gap: var(--sp-2); align-items: flex-start; }
+.te-count { text-align: right; margin-top: -0.3rem; }
+.form-error {
+  color: var(--red-deep); font-weight: 600; font-size: var(--fs-sub);
+  background: rgba(155, 34, 38, 0.1); border: 1px solid rgba(155, 34, 38, 0.3);
+  border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); margin: 0;
+}
