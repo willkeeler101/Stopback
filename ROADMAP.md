@@ -6,7 +6,7 @@ A door-to-door sales tracker. ~1 hour/day, ~2 weeks. Check things off as you go.
 > (from SalesRabbit, SPOTIO, and UX studies) guiding these decisions.
 
 ## Research-backed backlog (top 10 — see DESIGN-NOTES for the "why")
-1. **Map view of houses** — pins + status colors + knock history (biggest proven gap)
+1. ~~**Map view of houses**~~ ✅ v1+v2 DONE (GPS-tagged pins, clustering, smart markers, filters, bottom-sheet actions) — knock history/heatmap phases in [MAP-ARCHITECTURE.md](MAP-ARCHITECTURE.md)
 2. **One-tap door disposition** — log every knock (not home / no / callback / sale), not just stop backs
 3. **True offline PWA** — installable on home screen, works with zero signal, bundled fonts
 4. **Faster entry** — voice-to-text notes + address autocomplete to fight slow data entry (the #1 reason reps quit apps)
