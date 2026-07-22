@@ -121,7 +121,11 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   full-screen celebration) and the target rolls +1 forever (5/5 → 5/6 → 6/7)
   with rotating hype lines — gold never resets that day.
 - **Leads** — searchable list; call/text/missed/sale/delete/edit; interest +
-  callback badges.
+  callback badges. **List ⇄ Map toggle**: Leaflet territory map (CARTO/Esri
+  basemaps, clustered smart pins colored by status+interest with callback
+  rings, filter chips, bottom-sheet quick actions, callback-zone insight).
+  Coords come from the Log form's "Tag this house" GPS button (migration 6,
+  `leads.lat/lng`). Phased plan + future data models: MAP-ARCHITECTURE.md.
 - **Log** (center, larger) — counters, +1 tally, Add Stop Back form
   (name/phone/address, "How'd it go?" note, one-tap interest chips,
   optional "When to come back?" datetime).

@@ -72,11 +72,15 @@ and PRs protect us. SQL changes are **not** — anything pasted into the
 Supabase SQL Editor runs immediately against the real, shared data.
 
 **Rule:** if a feature needs a new table/column, add a new file to
-`supabase/` (name it `N-description-RUN-ME.sql`, next number in sequence)
-and include it in your PR like normal code — but **do not run it in the SQL
-Editor yourself.** Flag it in the PR so it gets run together, then rename it
-to `...-ALREADY-RUN.sql` once applied. Migrations should stay additive
-(`if not exists`) and never destructive.
+`supabase/` and include it in your PR like normal code — but **do not run it
+in the SQL Editor yourself.** Flag it in the PR so it gets run together, then
+rename it to `...-ALREADY-RUN.sql` once applied. Migrations should stay
+additive (`if not exists`) and never destructive.
+
+**Naming:** `N-yourname-description-RUN-ME.sql` — next number in sequence,
+**plus your first name** (e.g. `6-will-lead-coordinates-RUN-ME.sql`). The name
+prefix means that even if two people grab the same number on parallel
+branches, the files never collide when the branches merge.
 
 ## If you hit a merge conflict
 

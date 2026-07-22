@@ -29,6 +29,8 @@ function rowToLead(r) {
     id: r.id, name: r.name, phone: r.phone || "", address: r.address || "",
     interest: r.interest || "", demeanor: r.demeanor || "", notes: r.notes || "",
     callbackAt: r.callback_at || "", soldAt: r.sold_at || "",
+    // Map coordinates (migration 5). Absent on pre-migration rows -> null.
+    lat: r.lat == null ? null : r.lat, lng: r.lng == null ? null : r.lng,
     status: r.status, createdAt: r.created_at,
   };
 }
