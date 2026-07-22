@@ -212,6 +212,11 @@ async function dbLeaveTeam(teamId) {
   if (error) throw error;
 }
 async function dbDeleteTeam(teamId) {
+  // Remove the logo via the Storage API FIRST — while we still own the team, so
+  // the owner-only Storage policy authorizes it and the physical file is purged
+  // (Postgres can't delete storage.objects directly). Best-effort: a missing or
+  // failed removal must never block deleting the team.
+  await sb.storage.from("team-logos").remove([`${teamId}/logo`]).catch(() => {});
   const { error } = await sb.rpc("delete_team", { p_team: teamId });
   if (error) throw error;
 }
@@ -229,4 +234,40 @@ async function dbGetTeamOverview(teamId) {
   const { data, error } = await sb.rpc("get_team_overview", { p_team: teamId });
   if (error) throw error;
   return data || [];
+}
+
+// Team info + edit (migration 6). Ownership is enforced server-side.
+async function dbGetTeamMembers(teamId) {
+  const { data, error } = await sb.rpc("get_team_members", { p_team: teamId });
+  if (error) throw error;
+  return data || [];
+}
+async function dbUpdateTeam(teamId, { name, description }) {
+  const { error } = await sb.rpc("update_team", {
+    p_team: teamId,
+    p_name: name,
+    p_description: description ?? null,
+  });
+  if (error) throw error;
+}
+async function dbSetTeamLogo(teamId, url) {
+  const { error } = await sb.rpc("set_team_logo", { p_team: teamId, p_url: url });
+  if (error) throw error;
+}
+// Upload to the public 'team-logos' bucket at '<team_id>/logo' (owner-only via
+// Storage RLS), then persist a cache-busted public URL on the team.
+async function dbUploadTeamLogo(teamId, file) {
+  const path = `${teamId}/logo`;
+  const { error: upErr } = await sb.storage
+    .from("team-logos")
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (upErr) throw upErr;
+  const { data: pub } = sb.storage.from("team-logos").getPublicUrl(path);
+  const url = `${pub.publicUrl}?v=${Date.now()}`; // bust cache on replace
+  await dbSetTeamLogo(teamId, url);
+  return url;
+}
+async function dbRemoveTeamLogo(teamId) {
+  await sb.storage.from("team-logos").remove([`${teamId}/logo`]).catch(() => {});
+  await dbSetTeamLogo(teamId, null);
 }

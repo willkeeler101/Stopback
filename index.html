@@ -542,6 +542,74 @@
     </div>
   </div>
 
+  <!-- ===================== TEAM INFO MODAL ===================== -->
+  <div class="modal-overlay" id="team-info-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ti-title">
+      <button type="button" class="modal-x" id="ti-x" aria-label="Close">✕</button>
+      <div class="ti-head">
+        <span class="team-logo-lg" id="ti-logo">🏢</span>
+        <div>
+          <h2 class="card-title" id="ti-title" style="margin:0">Team</h2>
+          <p class="muted small" id="ti-owner"></p>
+        </div>
+      </div>
+      <p class="ti-desc" id="ti-desc"></p>
+      <h3 class="ti-subhead">Members</h3>
+      <ul class="ti-members" id="ti-members"></ul>
+      <p class="empty-hint" id="ti-empty" hidden style="margin:0.4rem 0 0">No other members yet — share your invite code to grow the crew.</p>
+      <div class="modal-actions">
+        <button type="button" class="primary" id="ti-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== TEAM INSIGHTS MODAL ===================== -->
+  <div class="modal-overlay" id="team-insights-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tin-title">
+      <button type="button" class="modal-x" id="tin-x" aria-label="Close">✕</button>
+      <div class="post-head">
+        <span class="avatar avatar-ai">🧠</span>
+        <div><span class="post-author" id="tin-title">Team Insights</span><span class="post-tag">Patterns to grow on</span></div>
+      </div>
+      <div class="ti-rows" id="tin-body"></div>
+      <div class="modal-actions">
+        <button type="button" class="primary" id="tin-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== EDIT TEAM MODAL (owner) ===================== -->
+  <div class="modal-overlay" id="team-edit-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="te-title">
+      <button type="button" class="modal-x" id="te-x" aria-label="Close">✕</button>
+      <h2 class="card-title" id="te-title">Edit team</h2>
+      <form id="team-edit-form" class="form">
+        <input type="hidden" id="te-id" />
+        <div class="te-logo-row">
+          <span class="team-logo-lg" id="te-logo-preview">🏢</span>
+          <div class="te-logo-actions">
+            <button type="button" class="ghost" id="te-logo-btn">Upload logo</button>
+            <button type="button" class="linkish" id="te-logo-remove" hidden>Remove logo</button>
+            <input type="file" id="te-logo-input" accept="image/png,image/jpeg,image/webp" hidden />
+            <p class="muted small">PNG, JPG or WebP · max 2MB</p>
+          </div>
+        </div>
+        <label>Team name
+          <input type="text" id="te-name" maxlength="60" required autocomplete="off" />
+        </label>
+        <label>Description
+          <textarea id="te-desc" rows="3" maxlength="500" placeholder="What's your crew about?"></textarea>
+        </label>
+        <p class="muted small te-count"><span id="te-desc-count">0</span>/500</p>
+        <p class="form-error" id="te-error" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="te-cancel">Cancel</button>
+          <button type="submit" class="primary" id="te-save">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- ===================== BOTTOM NAV ===================== -->
   <nav class="bottom-nav" hidden>
     <button class="nav-btn active" data-view="feed">
