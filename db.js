@@ -190,3 +190,41 @@ async function dbDeleteFriendship(id) {
   const { error } = await sb.from("friendships").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ---- teams (company crews — migration 5) -------------------------------
+// All reads/writes go through SECURITY DEFINER RPCs; the client never touches
+// teams/team_members across users directly. Membership implies stat-sharing
+// within that team (no per-user toggle), so the board/insights always fill.
+async function dbCreateTeam(name) {
+  const { data, error } = await sb.rpc("create_team", { p_name: name });
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+async function dbJoinTeam(code) {
+  const { data, error } = await sb.rpc("join_team_by_code", { p_code: code });
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+async function dbLeaveTeam(teamId) {
+  const { error } = await sb.rpc("leave_team", { p_team: teamId });
+  if (error) throw error;
+}
+async function dbDeleteTeam(teamId) {
+  const { error } = await sb.rpc("delete_team", { p_team: teamId });
+  if (error) throw error;
+}
+async function dbRemoveMember(teamId, userId) {
+  const { error } = await sb.rpc("remove_member", { p_team: teamId, p_user: userId });
+  if (error) throw error;
+}
+async function dbGetMyTeams() {
+  const { data, error } = await sb.rpc("get_my_teams");
+  if (error) throw error;
+  return data || [];
+}
+// Ranking rows + insight inputs for one team (empty unless you're a member).
+async function dbGetTeamOverview(teamId) {
+  const { data, error } = await sb.rpc("get_team_overview", { p_team: teamId });
+  if (error) throw error;
+  return data || [];
+}
