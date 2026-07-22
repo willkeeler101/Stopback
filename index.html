@@ -354,6 +354,12 @@
       </div>
 
       <div class="card">
+        <h2 class="card-title">Team</h2>
+        <p class="muted small">Join your company's crew for shared rankings &amp; insights — or create one and invite your reps.</p>
+        <button class="ghost" id="open-team" type="button">Manage Team →</button>
+      </div>
+
+      <div class="card">
         <h2 class="card-title">Sharing with friends</h2>
         <p class="muted small">Nothing is shared until a friend request is accepted.</p>
         <label class="toggle-row">
@@ -419,6 +425,38 @@
         <h2 class="card-title">Your friends</h2>
         <ul class="friends" id="friends-list"></ul>
         <p class="empty-hint" id="friends-empty">No friends yet. Search above to send a request.</p>
+      </div>
+    </section>
+
+    <!-- ===================== TEAM VIEW ===================== -->
+    <section class="view" id="view-teams" hidden>
+      <button class="back-link" id="teams-back" type="button">← Profile</button>
+      <h1 class="view-title">Team</h1>
+      <p class="view-sub">Compete and improve with your crew.</p>
+
+      <!-- Your current team(s): roster + join code, built by app.js -->
+      <div id="teams-current"></div>
+
+      <div class="card">
+        <h2 class="card-title">Join a team</h2>
+        <p class="muted small">Got a code from your manager? Enter it here.</p>
+        <form id="team-join-form">
+          <label>Team code
+            <input type="text" id="team-join-code" placeholder="ABC234" autocomplete="off" autocapitalize="characters" />
+          </label>
+          <button class="primary full" type="submit">Join team</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Create a team</h2>
+        <p class="muted small">You'll get a code to text your reps. You'll be the owner.</p>
+        <form id="team-create-form">
+          <label>Team name
+            <input type="text" id="team-create-name" placeholder="North Shore Verizon" autocomplete="off" />
+          </label>
+          <button class="ghost full" type="submit">Create team</button>
+        </form>
       </div>
     </section>
 

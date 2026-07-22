@@ -1240,3 +1240,58 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .geo-btn.tagged { background: var(--green); color: #fff; border-color: var(--green-deep); }
 .geo-btn:disabled { opacity: 0.6; cursor: default; }
 .geo-status { font-size: var(--fs-caption); color: var(--ink-soft); }
+
+/* ===== Teams (company crews) ===== */
+/* Team feed board reuses .post-leaderboard / .lb-* styling; these add the
+   team accents on top. */
+.avatar-team { background: linear-gradient(135deg, var(--amber), var(--amber-deep)); }
+.post-team .post-tag { color: var(--amber-deep); }
+.tm-crown { font-size: 0.85em; }
+
+/* Team insights card (rows of pattern callouts) */
+.ti-rows { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); }
+.ti-row { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.ti-icon {
+  flex: none; width: 32px; height: 32px; border-radius: var(--radius-sm);
+  display: grid; place-items: center; font-size: 1.05rem;
+  background: var(--paper-3);
+}
+.ti-text { display: flex; flex-direction: column; gap: 1px; }
+.ti-text strong { font-size: var(--fs-sub); color: var(--ink); }
+
+/* Team management (Profile → Team) */
+.team-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); margin-bottom: var(--sp-2);
+}
+.team-active { border-color: var(--amber); }
+.team-badge {
+  flex: none; font-size: var(--fs-caption); font-weight: 700;
+  color: var(--amber-deep); background: rgba(185, 121, 31, 0.14);
+  border: 1px solid var(--amber); border-radius: 999px;
+  padding: 2px var(--sp-2); white-space: nowrap;
+}
+.team-code-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); margin: var(--sp-2) 0;
+}
+.code-chip {
+  font-family: var(--font-body); font-weight: 800; letter-spacing: 0.12em;
+  font-size: var(--fs-body); color: var(--green-deep);
+  background: var(--paper-3); border: 1px dashed var(--line);
+  border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3);
+  cursor: pointer; display: inline-flex; align-items: center; gap: var(--sp-2);
+}
+.code-chip:hover { border-color: var(--green); }
+.code-chip.copied { border-color: var(--green); background: rgba(47, 107, 67, 0.12); }
+.code-copy {
+  font-size: var(--fs-caption); font-weight: 700; letter-spacing: normal;
+  color: var(--ink-soft); text-transform: uppercase;
+}
+.team-members { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.tm-row { display: flex; align-items: center; gap: var(--sp-3); }
+.tm-name { flex: 1; font-weight: 600; }
+.tm-remove { flex: none; color: var(--red); }
+.tm-remove:hover { color: var(--red-deep); }
+.danger-ghost { color: var(--red); border-color: rgba(155, 34, 38, 0.35); }
+.danger-ghost:hover { border-color: var(--red); color: var(--red-deep); }

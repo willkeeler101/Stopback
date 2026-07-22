@@ -14,6 +14,14 @@ the whole app revolves around.
 The funnel: **Contacts → Stop Backs → Sales**, with **Missed Closings** as the
 negative branch.
 
+## Team workflow (2-3 people, SHARED Supabase backend)
+- **Before starting ANY work:** `git checkout master && git pull`, then branch.
+  Never build on a stale branch — we overwrite each other otherwise.
+- The Supabase project is shared by the whole team. A bad migration or
+  destructive query hits everyone's data. Migrations stay additive
+  (`if not exists`), follow the numbered `RUN-ME` / `ALREADY-RUN` naming, and
+  get flagged to the team before running.
+
 ## Architecture (Phase 2+: Supabase is the source of truth)
 - **Multi-user app**: Supabase Auth (email/password) + Postgres + RLS.
 - On login, `db.js → dbLoadState()` pulls the rep's rows into the in-memory
