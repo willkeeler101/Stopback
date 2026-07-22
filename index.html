@@ -15,6 +15,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800;9..144,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
+  <!-- Leaflet (map view of leads) — free OpenStreetMap tiles, no API key -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -95,13 +98,31 @@
     <section class="view" id="view-leads" hidden>
       <h1 class="view-title">Leads</h1>
       <p class="view-sub">Everyone whose number you got.</p>
-      <input type="search" id="search" class="search" placeholder="Search name, address, notes…" />
-      <ul class="leads" id="leads-list"></ul>
-      <div class="empty-state" id="leads-empty">
-        <span class="empty-emoji">🚪</span>
-        <p class="empty-title">No stop backs yet</p>
-        <p class="empty-copy">Every deal starts with a name and a number. Log your first stop back and it'll show up here.</p>
-        <button class="primary" type="button" data-goto="log">Log a stop back</button>
+
+      <!-- List ⇄ Map toggle -->
+      <div class="leads-toggle" role="tablist" aria-label="Leads view">
+        <button class="lt-btn active" type="button" data-mode="list" role="tab" aria-selected="true">List</button>
+        <button class="lt-btn" type="button" data-mode="map" role="tab" aria-selected="false">Map</button>
+      </div>
+
+      <div id="leads-list-wrap">
+        <input type="search" id="search" class="search" placeholder="Search name, address, notes…" />
+        <ul class="leads" id="leads-list"></ul>
+        <div class="empty-state" id="leads-empty">
+          <span class="empty-emoji">🚪</span>
+          <p class="empty-title">No stop backs yet</p>
+          <p class="empty-copy">Every deal starts with a name and a number. Log your first stop back and it'll show up here.</p>
+          <button class="primary" type="button" data-goto="log">Log a stop back</button>
+        </div>
+      </div>
+
+      <div id="leads-map-wrap" hidden>
+        <div id="leads-map"></div>
+        <div class="map-empty" id="map-empty" hidden>
+          <span class="empty-emoji">🗺️</span>
+          <p class="empty-title">No houses pinned yet</p>
+          <p class="empty-copy">When you log a stop back, tap <strong>“Tag this house”</strong> to drop a pin here — right where you're standing.</p>
+        </div>
       </div>
     </section>
 
@@ -151,6 +172,15 @@
         <label>House address
           <input type="text" id="f-address" placeholder="123 Maple St" />
         </label>
+
+        <!-- Optional one-tap GPS pin — you're standing at the door. -->
+        <div class="geo-row">
+          <button type="button" class="geo-btn" id="f-geo-btn">📍 Tag this house</button>
+          <span class="geo-status" id="f-geo-status" aria-live="polite"></span>
+        </div>
+        <input type="hidden" id="f-lat" />
+        <input type="hidden" id="f-lng" />
+
         <label class="big-label" for="f-notes">How'd it go?</label>
         <textarea id="f-notes" class="notes-big" rows="3" placeholder="Quick note — what did they say?"></textarea>
 
@@ -465,6 +495,7 @@
 
   <!-- Supabase client + auth (Phase 2). config.js holds your keys (gitignored). -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="config.js"></script>
   <script src="supabase.js"></script>
   <script src="auth.js"></script>

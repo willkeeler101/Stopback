@@ -1309,6 +1309,133 @@ function renderCounters() {
 // =====================================================================
 //  LEADS
 // =====================================================================
+// =====================================================================
+//  Map view (Leaflet) — pins every lead that has GPS coordinates,
+//  colored by status. Coordinates are captured at log time (see
+//  tagLocation) — the rep is standing at the door, so they're accurate.
+// =====================================================================
+let leadsMap = null;         // Leaflet map instance (created lazily)
+let leadsMapLayer = null;    // layer group holding the pins
+let leadsViewMode = "list";  // "list" | "map"
+
+// Default center until there are pins: central Indiana (rep's home turf).
+const MAP_DEFAULT_CENTER = [39.7684, -86.1581];
+
+const PIN_STATUS_LABEL = { sale: "Sale", missed: "Missed closing", stopback: "Stop back" };
+
+function pinIcon(status) {
+  const s = PIN_STATUS_LABEL[status] ? status : "stopback";
+  return L.divIcon({
+    className: "sb-pin sb-pin-" + s,
+    html: '<span class="sb-pin-dot"></span>',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -12],
+  });
+}
+
+function mapPopupHtml(l) {
+  const digits = phoneDigits(l.phone);
+  const label = PIN_STATUS_LABEL[l.status] || "Stop back";
+  return (
+    `<div class="map-pop">` +
+    `<strong>${escapeHtml(l.name)}</strong>` +
+    `<span class="mp-status mp-${l.status}">${label}</span>` +
+    (l.address ? `<div class="mp-addr">📍 ${escapeHtml(l.address)}</div>` : "") +
+    `<div class="mp-actions">` +
+    `<a href="tel:${digits}">Call</a>` +
+    `<a href="sms:${digits}">Text</a>` +
+    `</div></div>`
+  );
+}
+
+// Create the map once, on first switch to map mode.
+function ensureLeadsMap() {
+  if (leadsMap) return leadsMap;
+  if (typeof L === "undefined") {
+    toast("⚠ Map failed to load (no connection?)");
+    return null;
+  }
+  leadsMap = L.map("leads-map", { zoomControl: true });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(leadsMap);
+  leadsMapLayer = L.layerGroup().addTo(leadsMap);
+  leadsMap.setView(MAP_DEFAULT_CENTER, 12);
+  return leadsMap;
+}
+
+function renderLeadsMap() {
+  if (!ensureLeadsMap()) return;
+  leadsMapLayer.clearLayers();
+  const pts = [];
+  state.leads.forEach((l) => {
+    if (l.lat == null || l.lng == null) return;
+    L.marker([l.lat, l.lng], { icon: pinIcon(l.status) })
+      .bindPopup(mapPopupHtml(l))
+      .addTo(leadsMapLayer);
+    pts.push([l.lat, l.lng]);
+  });
+  document.getElementById("map-empty").hidden = pts.length > 0;
+  // The container was hidden until now; fix sizing, then frame the pins.
+  setTimeout(() => {
+    leadsMap.invalidateSize();
+    if (pts.length) leadsMap.fitBounds(pts, { padding: [40, 40], maxZoom: 17 });
+  }, 0);
+}
+
+function setLeadsMode(mode) {
+  leadsViewMode = mode;
+  document.querySelectorAll(".lt-btn").forEach((b) => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  document.getElementById("leads-list-wrap").hidden = mode !== "list";
+  document.getElementById("leads-map-wrap").hidden = mode !== "map";
+  if (mode === "map") renderLeadsMap();
+}
+
+// ---- GPS capture in the Add Stop Back form --------------------------
+function tagLocation() {
+  const btn = document.getElementById("f-geo-btn");
+  const status = document.getElementById("f-geo-status");
+  if (!("geolocation" in navigator)) {
+    status.textContent = "No GPS on this device";
+    return;
+  }
+  btn.disabled = true;
+  status.textContent = "Locating…";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      document.getElementById("f-lat").value = pos.coords.latitude;
+      document.getElementById("f-lng").value = pos.coords.longitude;
+      btn.classList.add("tagged");
+      btn.textContent = "📍 House tagged ✓";
+      status.textContent = "Pin saved for this house";
+      btn.disabled = false;
+    },
+    (err) => {
+      status.textContent =
+        err.code === 1 ? "Location permission denied" : "Couldn't get location";
+      btn.disabled = false;
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+}
+
+// Reset the GPS control after a lead is saved / the form is cleared.
+function clearGeoTag() {
+  const btn = document.getElementById("f-geo-btn");
+  btn.classList.remove("tagged");
+  btn.textContent = "📍 Tag this house";
+  btn.disabled = false;
+  document.getElementById("f-geo-status").textContent = "";
+  document.getElementById("f-lat").value = "";
+  document.getElementById("f-lng").value = "";
+}
+
 function renderLeads() {
   const listEl = document.getElementById("leads-list");
   const emptyEl = document.getElementById("leads-empty");
@@ -1366,6 +1493,9 @@ function renderLeads() {
     li.querySelector(".del").onclick = () => deleteLead(l.id);
     listEl.appendChild(li);
   });
+
+  // Keep the map in sync when it's the active view (pins added/removed/restatused).
+  if (leadsViewMode === "map" && leadsMap) renderLeadsMap();
 }
 
 // =====================================================================
@@ -1658,6 +1788,9 @@ function addLead(e) {
   const phone = document.getElementById("f-phone").value.trim();
   if (!name || !phone) return;
 
+  const latV = document.getElementById("f-lat").value;
+  const lngV = document.getElementById("f-lng").value;
+
   const lead = {
     id: crypto.randomUUID(),
     name,
@@ -1670,6 +1803,9 @@ function addLead(e) {
     callbackAt: document.getElementById("f-callback").value
       ? new Date(document.getElementById("f-callback").value).toISOString()
       : "",
+    // Optional GPS pin captured with "Tag this house".
+    lat: latV ? parseFloat(latV) : null,
+    lng: lngV ? parseFloat(lngV) : null,
     status: "stopback",
     createdAt: new Date().toISOString(),
   };
@@ -1678,9 +1814,18 @@ function addLead(e) {
   markActiveToday();
   render();
   runGamification();
-  dbAddLead(lead).catch(dbFail("Couldn't save lead"));
+  // Insert the core row first; persist coordinates as a best-effort follow-up
+  // so logging never breaks even before migration 5 is run on the shared DB.
+  dbAddLead(lead)
+    .then(() =>
+      lead.lat != null && lead.lng != null
+        ? dbUpdateLead(lead.id, { lat: lead.lat, lng: lead.lng }).catch(() => {})
+        : null
+    )
+    .catch(dbFail("Couldn't save lead"));
   e.target.reset();
   clearInterestChips();
+  clearGeoTag();
   document.getElementById("f-name").focus();
 }
 
@@ -2105,6 +2250,12 @@ function wireEvents() {
   document.getElementById("tally-plus").addEventListener("click", () => bumpTally(1));
   document.getElementById("tally-minus").addEventListener("click", () => bumpTally(-1));
   document.getElementById("search").addEventListener("input", renderLeads);
+
+  // Leads list ⇄ map toggle + one-tap GPS capture on the Add Stop Back form.
+  document.querySelectorAll(".lt-btn").forEach((b) =>
+    b.addEventListener("click", () => setLeadsMode(b.dataset.mode))
+  );
+  document.getElementById("f-geo-btn").addEventListener("click", tagLocation);
 
   // Profile fields save as you type (debounced write to Supabase).
   document.getElementById("p-name").addEventListener("input", (e) => {

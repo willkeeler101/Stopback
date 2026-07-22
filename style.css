@@ -1090,3 +1090,68 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   text-decoration: underline; padding: 0;
 }
 .linkish:hover { color: var(--green); }
+
+/* ===================== Leads: List ⇄ Map ===================== */
+.leads-toggle {
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--paper-3); border: 1px solid var(--line);
+  border-radius: 999px; margin-bottom: var(--sp-4);
+}
+.lt-btn {
+  flex: 1; padding: 9px 0; border: none; background: transparent; cursor: pointer;
+  font-family: var(--font-body); font-weight: 700; font-size: var(--fs-sub);
+  color: var(--ink-soft); border-radius: 999px;
+}
+.lt-btn.active {
+  background: var(--paper); color: var(--green-deep);
+  box-shadow: var(--shadow);
+}
+
+#leads-map {
+  height: 62vh; min-height: 340px; width: 100%;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); z-index: 0;
+}
+.leaflet-container { font-family: var(--font-body); background: var(--paper-2); }
+
+/* Status-colored map pins (Leaflet divIcon) */
+.sb-pin-dot {
+  display: block; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(33, 28, 22, 0.4);
+}
+.sb-pin-stopback .sb-pin-dot { background: var(--green); }
+.sb-pin-missed   .sb-pin-dot { background: var(--red); }
+.sb-pin-sale     .sb-pin-dot { background: var(--gold); }
+
+/* Pin popup card */
+.map-pop { min-width: 140px; }
+.map-pop strong { display: block; font-size: 1rem; color: var(--ink); }
+.mp-status {
+  display: inline-block; margin-top: 3px; font-size: var(--fs-caption);
+  font-weight: 700; padding: 1px 8px; border-radius: 999px;
+  background: var(--green); color: #fff;
+}
+.mp-status.mp-missed { background: var(--red); }
+.mp-status.mp-sale { background: var(--gold-deep); }
+.mp-addr { margin-top: 6px; font-size: var(--fs-caption); color: var(--ink-soft); }
+.mp-actions { display: flex; gap: 8px; margin-top: 8px; }
+.mp-actions a {
+  flex: 1; text-align: center; padding: 6px 0; border-radius: var(--radius-sm);
+  font-weight: 700; font-size: var(--fs-sub); text-decoration: none;
+  background: var(--green); color: #fff;
+}
+.mp-actions a:last-child { background: var(--paper-3); color: var(--green-deep); }
+
+.map-empty { text-align: center; padding: var(--sp-5) var(--sp-4); }
+
+/* GPS "Tag this house" control on the Add Stop Back form */
+.geo-row { display: flex; align-items: center; gap: var(--sp-3); margin: 2px 0 var(--sp-2); }
+.geo-btn {
+  border: 1px solid var(--line); background: var(--paper-3);
+  color: var(--green-deep); font-family: var(--font-body); font-weight: 700;
+  font-size: var(--fs-sub); padding: 10px 14px; border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.geo-btn.tagged { background: var(--green); color: #fff; border-color: var(--green-deep); }
+.geo-btn:disabled { opacity: 0.6; cursor: default; }
+.geo-status { font-size: var(--fs-caption); color: var(--ink-soft); }
