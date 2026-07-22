@@ -124,7 +124,7 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   callback badges. **List ⇄ Map toggle**: Leaflet territory map (CARTO/Esri
   basemaps, clustered smart pins colored by status+interest with callback
   rings, filter chips, bottom-sheet quick actions, callback-zone insight).
-  Coords come from the Log form's "Tag this house" GPS button (migration 5,
+  Coords come from the Log form's "Tag this house" GPS button (migration 6,
   `leads.lat/lng`). Phased plan + future data models: MAP-ARCHITECTURE.md.
 - **Log** (center, larger) — counters, +1 tally, Add Stop Back form
   (name/phone/address, "How'd it go?" note, one-tap interest chips,
