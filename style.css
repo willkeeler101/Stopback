@@ -771,11 +771,12 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   font-size: 0.68rem; color: var(--ink-soft); font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.04em;
 }
-.ring-fg.sales { stroke: var(--amber); }
-.goal-ring { position: relative; width: 72px; height: 72px; flex-shrink: 0; }
-.goal-ring svg { width: 72px; height: 72px; transform: rotate(-90deg); }
+/* Both sales rings are green — a matching pair (amber variant retired
+   with the stop-back ring; amber stays the accent elsewhere). */
+.goal-ring { position: relative; width: 76px; height: 76px; flex-shrink: 0; }
+.goal-ring svg { width: 76px; height: 76px; transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: var(--paper-3); stroke-width: 8; }
-.ring-fg { fill: none; stroke: var(--green); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.5s ease; }
+.ring-fg { fill: none; stroke: var(--green); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.8s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .goal-ring-center {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;

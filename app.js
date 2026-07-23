@@ -22,7 +22,9 @@ const DEFAULT_STATE = {
   gamify: {
     badges: {},
     goalHitDate: "", // legacy (pre-gold); superseded by goalCelebrated
-    goalCelebrated: { stopbacks: "", sales: "" }, // date each goal last went gold
+    // stopbacks/sales: date each daily goal last went gold.
+    // salesWeek: the WEEK-START date ("Monday") the weekly goal last went gold.
+    goalCelebrated: { stopbacks: "", sales: "", salesWeek: "" },
     lastStreakCelebrated: 0,
     streakSeen: 0,
     records: {},           // personal bests: { key: { v, date } } — permanent
@@ -141,6 +143,23 @@ function salesToday() {
   const t = localDateStr();
   return state.leads.filter(
     (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === t
+  ).length;
+}
+
+// Monday of the current week as a local date string (same Mon-Sun math as
+// seedRecords' best-week backfill — keep the two in agreement).
+function weekStartStr(d = new Date()) {
+  const m = new Date(d);
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+  return localDateStr(m);
+}
+
+// Sales closed this calendar week (Mon-Sun). Same soldAt||createdAt
+// convention as salesToday so the two rings can never disagree.
+function salesThisWeek() {
+  const start = weekStartStr();
+  return state.leads.filter(
+    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) >= start
   ).length;
 }
 
@@ -369,10 +388,15 @@ function initGamify() {
   // Seed the gold-celebration stamps for goals already met, so a page load
   // or re-render can never re-fire a celebration.
   state.gamify.goalCelebrated = state.gamify.goalCelebrated || { stopbacks: "", sales: "" };
+  // Older stored gamify blobs predate the weekly key (the jsonb merge replaces
+  // the nested object wholesale) — guard it in, same pattern as above.
+  state.gamify.goalCelebrated.salesWeek = state.gamify.goalCelebrated.salesWeek || "";
   const sbGoal = state.profile.dailyGoal || 0;
   const sGoal = state.profile.salesGoal || 0;
+  const wkGoal = weeklySalesGoal();
   if (sbGoal > 0 && stopbacksToday() >= sbGoal) state.gamify.goalCelebrated.stopbacks = today;
   if (sGoal > 0 && salesToday() >= sGoal) state.gamify.goalCelebrated.sales = today;
+  if (wkGoal > 0 && salesThisWeek() >= wkGoal) state.gamify.goalCelebrated.salesWeek = weekStartStr();
   // Seed records from the leads on hand (v_daily_stats backfill runs async
   // in startApp). Silent — load can never trigger a record banner.
   seedRecords(null);
@@ -391,14 +415,21 @@ function runGamification(opts = {}) {
   // Daily goals → premium gold celebration, once per goal per day.
   state.gamify.goalCelebrated = state.gamify.goalCelebrated || { stopbacks: "", sales: "" };
   const gc = state.gamify.goalCelebrated;
+  gc.salesWeek = gc.salesWeek || ""; // pre-weekly-key blobs (see initGamify)
   const sbGoal = state.profile.dailyGoal || 0;
   const sGoal = state.profile.salesGoal || 0;
+  const wkGoal = weeklySalesGoal();
+  const wk = weekStartStr();
   const sbHit = sbGoal > 0 && stopbacksToday() >= sbGoal && gc.stopbacks !== today;
   const sHit = sGoal > 0 && salesToday() >= sGoal && gc.sales !== today;
+  const wHit = wkGoal > 0 && salesThisWeek() >= wkGoal && gc.salesWeek !== wk;
   if (sbHit) gc.stopbacks = today;
   if (sHit) gc.sales = today;
+  if (wHit) gc.salesWeek = wk;
+  // One overlay max — the biggest win headlines (week > daily sales > SB).
   let gold = false;
-  if (sbHit && sHit) { goldCelebration("BOTH GOALS DOWN"); gold = true; }
+  if (wHit) { goldCelebration(sHit ? "WEEK + TODAY DOWN" : "WEEK GOAL CRUSHED"); gold = true; }
+  else if (sbHit && sHit) { goldCelebration("BOTH GOALS DOWN"); gold = true; }
   else if (sbHit) { goldCelebration("STOP-BACK GOAL HIT"); gold = true; }
   else if (sHit) { goldCelebration("SALES GOAL HIT"); gold = true; }
 
@@ -901,45 +932,44 @@ function ringHtml(value, goal, cls, label, animate) {
     </div>`;
 }
 
-// Twin progress rings: today's stop backs AND sales vs your daily goals.
+// Twin sales rings: today vs your daily goal, this week (Mon-Sun) vs your
+// weekly goal. Matching pair, Apple-Fitness style. The daily stop-back goal
+// lives on in Profile + gold celebrations — it just has no ring here.
 function goalPost(animate) {
-  const sbGoal = state.profile.dailyGoal || 0;
   const sGoal = state.profile.salesGoal || 0;
-  if (sbGoal <= 0 && sGoal <= 0) return null;
+  const wGoal = weeklySalesGoal();
+  if (sGoal <= 0) return null; // weekly falls back off sGoal — both die together
 
-  const today = localDateStr();
-  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
-  const sb = todayLeads.length;
-  const sales = state.leads.filter(
-    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === today
-  ).length;
+  const sales = salesToday();
+  const week = salesThisWeek();
 
-  const rings = [];
-  if (sbGoal > 0) rings.push(ringHtml(sb, sbGoal, "", "Stop backs", animate));
-  if (sGoal > 0) rings.push(ringHtml(sales, sGoal, "sales", "Sales", animate));
+  const rings = [
+    ringHtml(sales, sGoal, "", "Today", animate),
+    ringHtml(week, wGoal, "", "This Week", animate),
+  ];
 
-  const sbDone = sbGoal > 0 && sb >= sbGoal;
-  const sDone = sGoal > 0 && sales >= sGoal;
-  const anyDone = sbDone || sDone;
-  const allDone = (sbGoal <= 0 || sbDone) && (sGoal <= 0 || sDone);
+  const sDone = sales >= sGoal;
+  const wDone = wGoal > 0 && week >= wGoal;
+  const anyDone = sDone || wDone;
+  const allDone = sDone && wDone;
 
   // Once a goal is achieved the message flips to hype and never resets today.
   const remaining = [
-    sbGoal > 0 && !sbDone ? `${sbGoal - sb} stop back${sbGoal - sb > 1 ? "s" : ""}` : "",
-    sGoal > 0 && !sDone ? `${sGoal - sales} sale${sGoal - sales > 1 ? "s" : ""}` : "",
-  ].filter(Boolean).join(" and ");
-  const hype = `<strong class="hype">${hypeLine("goal" + sb + "-" + sales + localDateStr())}</strong>`;
+    !sDone ? `${sGoal - sales} sale${sGoal - sales > 1 ? "s" : ""} today` : "",
+    !wDone && wGoal > 0 ? `${wGoal - week} this week` : "",
+  ].filter(Boolean).join(" · ");
+  const hype = `<strong class="hype">${hypeLine("goal" + sales + "-" + week + localDateStr())}</strong>`;
   const msg = allDone
     ? hype
     : anyDone
-    ? `${hype} ${remaining} to go today.`
-    : `${remaining} to go today.`;
+    ? `${hype} ${remaining}.`
+    : `${remaining}.`;
 
   const node = el(`
     <article class="post post-goal${anyDone ? " gold" : ""}">
       <div class="goal-cols">${rings.join("")}</div>
       <div class="goal-text">
-        <span class="post-tag">Today's goals</span>
+        <span class="post-tag">Sales goals</span>
         <p class="post-body">${msg}</p>
       </div>
     </article>`);
