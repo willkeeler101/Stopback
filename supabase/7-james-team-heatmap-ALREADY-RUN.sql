@@ -2,8 +2,8 @@
 -- StopBack — migration 7: Team heat map (binned door/sale density)
 -- Run ONCE in Supabase → SQL Editor, AFTER files 1–6. Safe to re-run.
 --
--- ⚠ NOT YET RUN. Per CONTRIBUTING.md this ships in the PR un-run; the client
---   degrades to a self-only heat map (local leads) until it's applied.
+-- Run by the maintainer on 2026-07-22. The client
+-- degraded to a self-only heat map (local leads) until it was applied.
 --
 -- Adds get_team_heat(): aggregate lead density for one team's GPS-tagged
 -- doors, for the Team Intelligence "Heat map" tab.
