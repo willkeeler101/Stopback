@@ -1273,7 +1273,10 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   display: flex; flex-direction: column;
   max-height: 92vh;
 }
-.td-head { display: flex; align-items: center; gap: var(--sp-3); padding-right: 2rem; }
+/* The head, tab strip and footer are fixed-size; only the body scrolls.
+   Without flex:none they shrink in the height-capped modal and the 40px tab
+   pills spill underneath the scrolling content. */
+.td-head { display: flex; align-items: center; gap: var(--sp-3); padding-right: 2rem; flex: none; }
 .td-headtext { display: flex; flex-direction: column; min-width: 0; }
 .td-headtext .post-author { font-family: var(--font-display); font-size: 1.15rem; }
 
@@ -1281,6 +1284,7 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 .td-tabs {
   display: flex; gap: var(--sp-1); margin: var(--sp-3) 0 var(--sp-2);
   overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+  flex: none;
 }
 .td-tabs::-webkit-scrollbar { display: none; }
 .td-tab {
@@ -1290,7 +1294,9 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 }
 .td-tab.is-on { background: var(--green); border-color: var(--green); color: #fff; }
 
-.td-body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px; }
+/* min-height:0 lets this actually scroll instead of growing the modal. */
+.td-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px; }
+.modal-dash .modal-actions { flex: none; }
 .td-card {
   background: var(--paper-2); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 0.9rem; margin-bottom: var(--sp-3);
@@ -1380,6 +1386,53 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
   width: 100%; text-align: right; line-height: 1.2;
 }
 .td-sc-sort.is-on { color: var(--green-deep); }
+
+/* Crew signals — grouped into "Needs a look" / "Worth calling out". */
+.td-siggroup + .td-siggroup { margin-top: var(--sp-4); }
+.td-sig-head {
+  font-family: var(--font-body); font-size: var(--fs-caption); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft);
+  margin-bottom: var(--sp-2);
+}
+/* .empty-hint centres and pads for full-view empties; inside a signal group
+   it should read as a quiet inline note. */
+.td-sig-empty { margin: 0; padding: var(--sp-2) 0; font-size: var(--fs-sub); text-align: left; }
+.td-sig .ti-text strong { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* The number behind the signal, so a lead sees the magnitude without reading
+   the sentence. Tone is reinforced by the arrow/label, never color alone. */
+.td-sig-metric {
+  font-family: var(--font-body); font-size: var(--fs-caption); font-weight: 700;
+  padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+}
+.td-sig-metric.tone-good { background: #dcebe0; color: var(--green-deep); }
+.td-sig-metric.tone-warn { background: #f0e2c8; color: var(--amber-deep); }
+
+/* Where you stand — rank tiles + the gap to the rep above. */
+.td-standing { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.td-rankbox {
+  background: var(--paper-3); border-radius: var(--radius-sm); padding: 0.6rem 0.7rem;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.td-rankbox.is-wide { grid-column: 1 / -1; }
+.td-rank-val { font-family: var(--font-display); font-size: 1.7rem; line-height: 1.1; color: var(--green-deep); }
+.td-rank-lab { font-size: var(--fs-caption); color: var(--ink-soft); }
+.td-rank-gap { font-size: var(--fs-sub); color: var(--ink); font-weight: 600; }
+
+/* You vs the crew — paired bars, both direct-labeled. */
+.td-vs { display: flex; flex-direction: column; gap: var(--sp-4); }
+.td-vs-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.td-vs-label { font-size: var(--fs-sub); font-weight: 600; color: var(--ink); }
+.td-vs-gap { font-size: var(--fs-caption); font-weight: 700; white-space: nowrap; }
+.td-vs-gap.is-up { color: var(--green-deep); }
+.td-vs-gap.is-down { color: var(--amber-deep); }
+.td-vs-row { display: flex; align-items: center; gap: var(--sp-2); margin-top: 4px; }
+.td-vs-who { flex: none; width: 38px; font-size: var(--fs-caption); color: var(--ink-soft); }
+.td-vs-track { flex: 1; background: var(--paper-3); border-radius: 4px; height: 16px; overflow: hidden; }
+.td-vs-bar { display: block; height: 100%; border-radius: 0 4px 4px 0; transition: width 0.5s ease; }
+.td-vs-bar.is-mine { background: var(--c-accent); }
+.td-vs-bar.is-crew { background: var(--c-muted); }
+.td-vs-val { flex: none; width: 46px; text-align: right; font-family: var(--font-display); font-size: var(--fs-sub); }
+.td-vs-none { font-size: var(--fs-caption); color: var(--ink-soft); margin-top: 4px; }
 
 /* Shared chart tooltip. */
 .td-tip {
