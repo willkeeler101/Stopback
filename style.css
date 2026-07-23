@@ -184,10 +184,14 @@ button, a, .chip, .nav-btn .bubble, input, select, textarea {
 
 /* ===== For You feed ===== */
 .feed-head {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
-  margin-bottom: 1rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  margin-bottom: var(--sp-3);
 }
-.feed-head .view-sub { margin-bottom: 0; }
+/* Greeting steps down: the segmented tabs are the visual anchor now */
+.feed-greeting {
+  font-size: var(--fs-h2); font-weight: 700; letter-spacing: -0.01em;
+  color: var(--ink);
+}
 .streak-chip {
   display: flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
   background: var(--ink); color: var(--paper);
@@ -195,7 +199,42 @@ button, a, .chip, .nav-btn .bubble, input, select, textarea {
 }
 .streak-chip strong { font-size: 1.1rem; }
 
+/* Segmented feed tabs — For You | <team>. Bigger + calmer than .seg:
+   ink-on-paper active pill, no color fill, native-app feel. */
+.feed-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px;
+  margin-bottom: var(--sp-4);
+}
+.ft-btn {
+  border: none; background: transparent; cursor: pointer;
+  min-height: 44px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: var(--fs-body); font-weight: 700;
+  color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 var(--sp-3);
+}
+.ft-btn.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.ft-btn:active { transform: scale(0.98); }
+
+/* Pane switch: quick fade + slight slide; reduced-motion kill covers it */
+.feed-pane.pane-in { animation: paneIn 0.18s ease both; }
+@keyframes paneIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
 .feed-stream { display: flex; flex-direction: column; gap: var(--sp-3); }
+#team-hub { display: flex; flex-direction: column; gap: var(--sp-3); }
 
 /* Post card */
 .post {

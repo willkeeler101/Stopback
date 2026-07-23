@@ -78,20 +78,26 @@
     <!-- ===================== FEED (FOR YOU) VIEW ===================== -->
     <section class="view" id="view-feed">
       <div class="feed-head">
-        <div>
-          <h1 class="view-title" id="feed-greeting">Welcome back</h1>
-          <p class="view-sub">Your For You page</p>
-        </div>
+        <h1 class="feed-greeting" id="feed-greeting">Welcome back</h1>
         <div class="streak-chip" title="Day streak">
           <span class="streak-flame">🔥</span><strong id="streak-num">0</strong>
         </div>
       </div>
-      <!-- The whole scrollable feed is built here by app.js.
-           Skeletons show briefly on load instead of a blank flash. -->
-      <div class="feed-stream" id="feed-stream">
-        <div class="skeleton-card"></div>
-        <div class="skeleton-card"></div>
-        <div class="skeleton-card"></div>
+      <!-- For You | <active team> — the right tab always mirrors activeTeamId -->
+      <div class="feed-tabs" role="tablist" aria-label="Feed">
+        <button class="ft-btn active" type="button" data-tab="foryou" role="tab" aria-selected="true">For You</button>
+        <button class="ft-btn" type="button" data-tab="team" role="tab" aria-selected="false" id="ft-team">Team</button>
+      </div>
+      <div class="feed-panes">
+        <!-- The whole scrollable feed is built here by app.js.
+             Skeletons show briefly on load instead of a blank flash. -->
+        <div class="feed-stream feed-pane" id="feed-stream">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+        <!-- Team Hub — built lazily by renderTeamHub() -->
+        <div class="feed-pane" id="team-hub" hidden></div>
       </div>
     </section>
 

@@ -1695,6 +1695,28 @@ function interleave(...lists) {
 // so later re-renders (after logging, liking, etc.) don't re-jump.
 let feedAnimated = false;
 
+// Which top feed tab is showing: "foryou" | "team". Survives nav away/back
+// (switchView only toggles .view sections — this state lives here).
+let feedTab = "foryou";
+
+function setFeedTab(tab) {
+  feedTab = tab;
+  document.querySelectorAll(".ft-btn").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  const stream = document.getElementById("feed-stream");
+  const hub = document.getElementById("team-hub");
+  stream.hidden = tab !== "foryou";
+  hub.hidden = tab !== "team";
+  const shown = tab === "team" ? hub : stream;
+  shown.classList.remove("pane-in");
+  void shown.offsetWidth; // restart the pane transition
+  shown.classList.add("pane-in");
+  if (tab === "team") renderTeamHub(); // lazy — built on first open, kept fresh after
+}
+
 // Live stats for you + accepted friends — fills the feed's achievements.
 let friendsOverview = [];
 async function refreshFriendsOverview() {
@@ -1707,6 +1729,14 @@ async function refreshFriendsOverview() {
   }
 }
 
+// Team Hub pane (right feed tab). Placeholder here — fully built in the
+// Team Hub phase; keeping a stub so setFeedTab never throws.
+function renderTeamHub() {
+  const hub = document.getElementById("team-hub");
+  if (!hub) return;
+  hub.innerHTML = "";
+}
+
 function renderFeed() {
   const name = state.profile.name ? state.profile.name.split(" ")[0] : "there";
   const hour = new Date().getHours();
@@ -1714,6 +1744,11 @@ function renderFeed() {
   document.getElementById("feed-greeting").textContent = `${part}, ${name} 👋`;
   document.getElementById("streak-num").textContent = currentStreak();
   maybeAnimateStreak();
+
+  // The right tab always mirrors the active team (set via Team manager).
+  const team = activeTeam();
+  document.getElementById("ft-team").textContent = team ? team.name : "Team";
+  if (feedTab === "team") renderTeamHub();
 
   const animate = !feedAnimated;
   const stream = document.getElementById("feed-stream");
@@ -2913,6 +2948,11 @@ function wireEvents() {
   document.getElementById("tally-plus").addEventListener("click", () => bumpTally(1));
   document.getElementById("tally-minus").addEventListener("click", () => bumpTally(-1));
   document.getElementById("search").addEventListener("input", renderLeads);
+
+  // Feed: For You ⇄ Team tab switch.
+  document.querySelectorAll(".ft-btn").forEach((b) =>
+    b.addEventListener("click", () => setFeedTab(b.dataset.tab))
+  );
 
   // Leads list ⇄ map toggle + one-tap GPS capture on the Add Stop Back form.
   document.querySelectorAll(".lt-btn").forEach((b) =>
