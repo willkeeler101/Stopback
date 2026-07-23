@@ -117,6 +117,20 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   **Weekly Recognition** (live weekly award leaders, gold accents), weekly
   recap. Profile has an **Achievement Showcase** (collectible tiles; record
   tiles gold; keeps p-contacts/p-stopbacks/p-sales/p-days ids).
+  **Company Teams** (migrations 5–7; the planned $19.99/mo team-lead
+  monetization — no paywall yet, seam is `create_team`): owner creates a
+  team, reps join by code; membership implies stat-sharing (aggregates only,
+  never raw leads/phones). Feed carries the **team ranking board** whose 📊
+  button opens **Team Intelligence**, a five-tab dashboard modal in app.js
+  (`td*` functions): Overview (KPIs + crew funnel — uses `contacts_month`),
+  Crew (signals grouped "Needs a look"/"Worth calling out", one entry per
+  rep, SALES-first phrasing with both weeks' counts — see `tdSalesMove`;
+  sortable scorecard), Timing (closing windows + 30-day trend), You (rank,
+  paired-bar comparisons vs the REST of the crew, personal funnel), and
+  **Heat map** (~275 m grid cells over the Leads-map basemap, Contacts/Sales
+  toggle, binned server-side by `get_team_heat` — never individual houses).
+  Chart colors are validated `--c-*` tokens in style.css; green+amber are
+  CVD-ambiguous so marks are always direct-labeled.
   Daily goals go **GOLD** when hit (metallic ring + card sheen + ~2.5s
   full-screen celebration) and the target rolls +1 forever (5/5 → 5/6 → 6/7)
   with rotating hype lines — gold never resets that day.

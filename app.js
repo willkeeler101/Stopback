@@ -1216,82 +1216,794 @@ function teamLeaderboardPost() {
 // best time of day. Each row only appears when there's enough data.
 const TEAM_CLOSE_MIN = 5;   // decided closings (sales+missed) to rate someone
 
-function computeTeamInsights(rows) {
-  const me = rows.find((r) => r.is_self);
-  if (!me) return [];
+// Shared per-rep metrics — used by both the crew signals and Your read, so
+// the two tabs can never disagree about what a rep's numbers are.
+const tdDecided   = (r) => (r.sales_month || 0) + (r.missed_month || 0);
+const tdCloseRate = (r) => (tdDecided(r) >= TEAM_CLOSE_MIN ? (r.sales_month || 0) / tdDecided(r) : null);
+const tdDoorRate  = (r) => tdRate(r.stopbacks_month || 0, r.contacts_month || 0);  // contacts -> stop backs
+const tdConvRate  = (r) => tdRate(r.sales_month || 0, r.stopbacks_month || 0);     // stop backs -> sales
+const tdWow       = (r) => {
+  const prev = r.stopbacks_prev_week || 0;
+  return prev > 0 ? ((r.stopbacks_week || 0) - prev) / prev : null;
+};
+// Sales momentum is the headline momentum (it's what the business runs on),
+// but weekly sales counts are small, so percent alone is noise — a 1 -> 2
+// week is "+100%". tdSalesMove only reports when the counts make the move
+// real: null means "no story this week", not "no data".
+const tdSalesMove = (r) => {
+  const now = r.sales_week || 0, prev = r.sales_prev_week || 0;
+  if (prev >= 2 && now >= prev * 1.4 && now - prev >= 2) return { dir: 1,  now, prev };
+  if (prev === 0 && now >= 3)                            return { dir: 1,  now, prev };
+  if (prev >= 3 && now <= prev * 0.5)                    return { dir: -1, now, prev };
+  return null;
+};
 
-  const items = [];
+// Pooled rate across a set of reps (total/total), NOT the mean of each rep's
+// rate — averaging rates lets someone with 3 contacts swing the crew number
+// as hard as someone with 300.
+function tdPooled(rows, numKey, denKey) { return tdRate(tdSum(rows, numKey), tdSum(rows, denKey)); }
 
-  // 1) Close rate vs the team (30-day window).
-  const decided = (r) => (r.sales_month || 0) + (r.missed_month || 0);
-  const closeRate = (r) => (decided(r) ? (r.sales_month || 0) / decided(r) : null);
-  const rated = rows.filter((r) => decided(r) >= TEAM_CLOSE_MIN);
-  if (rated.length && decided(me) >= TEAM_CLOSE_MIN) {
-    const mine = closeRate(me);
-    const avg = rated.reduce((s, r) => s + closeRate(r), 0) / rated.length;
-    const pct = (v) => Math.round(v * 100) + "%";
-    const rank = [...rated].sort((a, b) => closeRate(b) - closeRate(a)).findIndex((r) => r.is_self) + 1;
-    let detail;
-    if (mine >= avg) detail = `Your ${pct(mine)} beats the team's ${pct(avg)} average${rank === 1 ? " — #1 on the crew 🥇" : ""}.`;
-    else detail = `You're at ${pct(mine)} vs the team's ${pct(avg)} average — room to climb.`;
-    items.push({ icon: "🎯", label: "Close rate", detail });
+// Rank of a rep within the crew on a metric, 1 = best. Ties share a rank.
+function tdRankOf(rows, r, metric) {
+  const mine = metric(r);
+  if (mine === null || mine === undefined) return null;
+  return rows.filter((o) => {
+    const v = metric(o);
+    return v !== null && v !== undefined && v > mine;
+  }).length + 1;
+}
+
+function tdOrdinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+// ---- Team Intelligence dashboard ----------------------------------------
+// The manager-facing view of the same aggregates the board already loads.
+// Four tabs: Overview (KPIs + funnel), Crew (scorecard + signals), Timing
+// (closing windows + 30-day trend), You (the personal read above).
+//
+// Charts are hand-rolled HTML/SVG — no chart library (rule 5, no build step).
+// Colors come from the validated chart tokens in style.css: a single-hue
+// green sequential ramp for the funnel, emphasis (one green mark, the rest
+// muted) for comparisons. Green and amber sit in the CVD floor band, so any
+// two-series mark is ALWAYS direct-labeled — never color alone.
+//
+// Everything here is derived from get_team_overview's existing columns, so
+// no migration is needed. contacts_month in particular was previously
+// loaded and never used — it's what makes a real funnel possible.
+
+let tdTab = "overview";           // overview | crew | timing | you
+
+// Sum a column across the crew.
+function tdSum(rows, key) { return rows.reduce((s, r) => s + (r[key] || 0), 0); }
+
+// Percent, guarding divide-by-zero. Returns null when there's no denominator.
+function tdRate(num, den) { return den > 0 ? num / den : null; }
+function tdPct(v, digits = 0) { return v === null ? "—" : (v * 100).toFixed(digits) + "%"; }
+
+// Week-over-week change for a metric across the crew.
+function tdDelta(rows, weekKey, prevKey) {
+  const now = tdSum(rows, weekKey), prev = tdSum(rows, prevKey);
+  if (prev <= 0) return null;
+  return (now - prev) / prev;
+}
+
+// A delta chip: green up / red down / muted flat. Arrow + sign carry the
+// direction too, so it never reads by color alone.
+function tdDeltaHtml(d) {
+  if (d === null || !isFinite(d)) return `<span class="td-delta is-flat">no prior week</span>`;
+  const p = Math.round(Math.abs(d) * 100);
+  if (p < 1) return `<span class="td-delta is-flat">→ flat</span>`;
+  const up = d > 0;
+  return `<span class="td-delta ${up ? "is-up" : "is-down"}">${up ? "↑" : "↓"} ${p}% vs last week</span>`;
+}
+
+function tdName(r) { return r.display_name || "@" + (r.username || "rep"); }
+
+// ---- Charts -------------------------------------------------------------
+
+// Funnel: Contacts → Stop Backs → Sales as horizontal bars on one shared
+// scale (bar length is honestly proportional to the count), with the
+// conversion rate called out between stages. Single-hue ramp, deeper = later
+// in the funnel. Every bar is direct-labeled, which is also the required
+// relief for the lightest step's contrast on cream.
+function tdFunnelHtml(stages) {
+  const max = Math.max(1, ...stages.map((s) => s.value));
+  return `<div class="td-funnel">${stages.map((s, i) => {
+    const prev = i > 0 ? stages[i - 1] : null;
+    const conv = prev ? tdRate(s.value, prev.value) : null;
+    const step = `<div class="td-fn-step">
+        <div class="td-fn-label"><span>${escapeHtml(s.label)}</span><b>${s.value.toLocaleString()}</b></div>
+        <div class="td-fn-track">
+          <div class="td-fn-bar td-fill-${i + 1}" style="width:${Math.max(2, (s.value / max) * 100)}%"
+               data-tip="${escapeHtml(s.label)}: ${s.value.toLocaleString()}"></div>
+        </div>
+      </div>`;
+    const link = conv === null ? "" :
+      `<div class="td-fn-conv"><span class="td-fn-arrow" aria-hidden="true">↓</span>
+         <span>${tdPct(conv, conv < 0.1 ? 1 : 0)} of ${escapeHtml(prev.label.toLowerCase())} became ${escapeHtml(s.label.toLowerCase())}</span>
+       </div>`;
+    return (i > 0 ? link : "") + step;
+  }).join("")}</div>`;
+}
+
+// Closing windows: sales by hour of day, 8am–9pm, viewer-local. Emphasis
+// form — the peak two-hour block is the accent green, every other hour is
+// the muted track color, so the one thing that matters pops without a
+// legend. Hours with no sales still render an empty column (an absent bar
+// is data too).
+const TD_HOUR_FROM = 8, TD_HOUR_TO = 21;
+function tdHoursHtml(times, peak) {
+  const buckets = new Array(24).fill(0);
+  (times || []).forEach((t) => { buckets[new Date(t).getHours()]++; });
+  const span = [];
+  for (let h = TD_HOUR_FROM; h <= TD_HOUR_TO; h++) span.push(h);
+  const max = Math.max(1, ...span.map((h) => buckets[h]));
+  const inPeak = (h) => peak && (h === peak.start || h === (peak.start + 1) % 24);
+  const cols = span.map((h) => {
+    const n = buckets[h];
+    const pctH = (n / max) * 100;
+    return `<div class="td-hr-col">
+        <div class="td-hr-track">
+          <div class="td-hr-bar ${inPeak(h) ? "is-peak" : ""}" style="height:${n ? Math.max(4, pctH) : 0}%"
+               data-tip="${hourLabel(h)}–${hourLabel((h + 1) % 24)}: ${n} sale${n === 1 ? "" : "s"}"></div>
+        </div>
+        <span class="td-hr-lab">${h % 3 === 0 ? hourLabel(h).replace(":00", "") : ""}</span>
+      </div>`;
+  }).join("");
+  return `<div class="td-hours">${cols}</div>`;
+}
+
+// 30-day sales trend: area + line, one series, so no legend — the card
+// title names it. Points are hoverable for the exact day. Rendered in a
+// viewBox so it scales to any card width; strokes stay 2px via
+// vector-effect, per the mark spec.
+function tdTrendHtml(times, days = 30) {
+  const byDay = new Map();
+  (times || []).forEach((t) => {
+    const k = localDateStr(new Date(t));
+    byDay.set(k, (byDay.get(k) || 0) + 1);
+  });
+  const pts = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(dayStart(i));
+    pts.push({ key: localDateStr(d), date: d, v: byDay.get(localDateStr(d)) || 0 });
   }
+  const total = pts.reduce((s, p) => s + p.v, 0);
+  if (!total) return `<p class="empty-hint" style="margin:0">No timestamped sales in the last ${days} days yet.</p>`;
 
-  // 2) Pace & momentum (this week's effort vs last week's).
-  const change = (r) => {
-    const prev = r.stopbacks_prev_week || 0;
-    if (prev <= 0) return null;
-    return ((r.stopbacks_week || 0) - prev) / prev;
-  };
-  const myChange = change(me);
-  if (myChange !== null && Math.abs(myChange) >= 0.1) {
-    const p = Math.round(Math.abs(myChange) * 100);
-    items.push({
-      icon: myChange > 0 ? "📈" : "📉",
-      label: "Your momentum",
-      detail: myChange > 0
-        ? `Stop backs up ${p}% vs last week — you're heating up.`
-        : `Stop backs down ${p}% vs last week — time to push the doors.`,
-    });
-  } else if (rows.length > 1) {
-    // No personal signal? Spotlight the crew's biggest mover instead.
-    const movers = rows.map((r) => ({ r, c: change(r) })).filter((m) => m.c !== null && m.c > 0.1);
-    if (movers.length) {
-      const top = movers.sort((a, b) => b.c - a.c)[0];
-      const who = top.r.is_self ? "You're" : (top.r.display_name || "@" + top.r.username) + " is";
-      items.push({ icon: "🚀", label: "On the rise", detail: `${escapeHtml(who)} up ${Math.round(top.c * 100)}% in stop backs this week.` });
+  const W = 320, H = 90, PAD = 6;
+  const max = Math.max(1, ...pts.map((p) => p.v));
+  const x = (i) => PAD + (i * (W - PAD * 2)) / (pts.length - 1);
+  const y = (v) => H - PAD - (v / max) * (H - PAD * 2);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(pts.length - 1).toFixed(1)},${H - PAD} L${x(0).toFixed(1)},${H - PAD} Z`;
+  // Only the peak day gets a dot + label — never a number on every point.
+  const peakI = pts.reduce((bi, p, i) => (p.v > pts[bi].v ? i : bi), 0);
+  const dots = pts.map((p, i) => `
+    <circle class="td-tr-dot ${i === peakI ? "is-peak" : ""}" cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}"
+            r="${i === peakI ? 3.5 : 2.2}"
+            data-tip="${formatDateShort(p.key)}: ${p.v} sale${p.v === 1 ? "" : "s"}"></circle>`).join("");
+
+  return `
+    <svg class="td-trend" viewBox="0 0 ${W} ${H}" role="img"
+         aria-label="Team sales per day over the last ${days} days, ${total} total, peak ${pts[peakI].v} on ${formatDateShort(pts[peakI].key)}">
+      <path class="td-tr-area" d="${area}"></path>
+      <path class="td-tr-line" d="${line}"></path>
+      ${dots}
+    </svg>
+    <div class="td-axis"><span>${formatDateShort(pts[0].key)}</span><span>${formatDateShort(pts[pts.length - 1].key)}</span></div>`;
+}
+
+// ---- Crew signals -------------------------------------------------------
+// The lead's read on the crew. Operational patterns about ACTIVITY — who to
+// check on and who's carrying — never advice on how to sell (rule 6). The
+// app surfaces the pattern and the number behind it; the lead decides what
+// to do about it.
+//
+// Two groups, because a lead scans for different things: "Needs a look"
+// (act on these) and "Worth calling out" (recognition). Within each, the
+// strongest signal wins — and a rep can only appear ONCE in Needs a look,
+// as their single most serious issue, so one struggling week doesn't
+// generate four bullets about the same person.
+
+// How far below the crew a rate has to sit before it's worth flagging.
+const TD_LAG = 0.65;
+
+function tdSignals(rows) {
+  const crewDoor  = tdPooled(rows, "stopbacks_month", "contacts_month");
+  const crewConv  = tdPooled(rows, "sales_month", "stopbacks_month");
+  const crewClose = tdRate(tdSum(rows, "sales_month"),
+                           tdSum(rows, "sales_month") + tdSum(rows, "missed_month"));
+  const teamSales = tdSum(rows, "sales_month");
+
+  // --- Needs a look: one entry per rep, their most serious issue ----------
+  // Sales are the headline metric — a rep's week is "how many sales", and
+  // stop backs only speak when sales can't.
+  const attention = [];
+  rows.forEach((r) => {
+    const cands = [];
+
+    // Went dark this week after being active — the most urgent thing a lead
+    // can know, so it outranks everything else for this rep. "Quiet" means
+    // nothing logged at all: no sales AND no stop backs.
+    if ((r.sales_week || 0) === 0 && (r.stopbacks_week || 0) === 0
+        && ((r.sales_month || 0) > 0 || (r.stopbacks_month || 0) > 0))
+      cands.push({ score: 100, icon: "\ud83c\udf19", tone: "warn", label: "Went quiet",
+        detail: `${tdName(r)} hasn't logged a sale or a stop back in the last 7 days — ${r.sales_month} sale${r.sales_month === 1 ? "" : "s"} in the 30 before that.`,
+        metric: "0 this week" });
+
+    // Selling well below their own last week.
+    const move = tdSalesMove(r);
+    if (move && move.dir < 0)
+      cands.push({ score: 60 + (move.prev - move.now) * 8, icon: "\ud83d\udcc9", tone: "warn", label: "Sales cooling off",
+        detail: `${tdName(r)} is down to ${move.now} sale${move.now === 1 ? "" : "s"} this week from ${move.prev} last week.`,
+        metric: `${move.prev} → ${move.now}` });
+
+    // Plenty of doors, few conversations converting into stop backs.
+    const door = tdDoorRate(r);
+    if (door !== null && crewDoor && (r.contacts_month || 0) >= 20 && door < crewDoor * TD_LAG)
+      cands.push({ score: 45 + (crewDoor - door) * 100, icon: "\ud83d\udeaa", tone: "warn", label: "Volume without traction",
+        detail: `${tdName(r)} logged ${r.contacts_month} contacts and got ${r.stopbacks_month} stop backs — ${tdPct(door, 1)} against the crew's ${tdPct(crewDoor, 1)}.`,
+        metric: tdPct(door, 1) });
+
+    // Stop backs piling up that aren't turning into closings.
+    const conv = tdConvRate(r);
+    if (conv !== null && crewConv && (r.stopbacks_month || 0) >= 10 && conv < crewConv * TD_LAG)
+      cands.push({ score: 40 + (crewConv - conv) * 100, icon: "\ud83d\udcde", tone: "warn", label: "Stop backs going cold",
+        detail: `${tdName(r)} has ${r.stopbacks_month} stop backs but ${r.sales_month} sales — ${tdPct(conv)} against the crew's ${tdPct(crewConv)}.`,
+        metric: tdPct(conv) });
+
+    if (cands.length) attention.push(cands.sort((a, b) => b.score - a.score)[0]);
+  });
+
+  // --- Worth calling out --------------------------------------------------
+  const wins = [];
+
+  // Biggest climber, on SALES. When nobody's sales moved enough to be a
+  // story, fall back to the biggest stop-back climber (relabeled) so a
+  // slow-closing week still recognizes the rep filling the pipeline.
+  const salesClimbers = rows.map((r) => ({ r, m: tdSalesMove(r) })).filter((x) => x.m && x.m.dir > 0);
+  if (salesClimbers.length) {
+    const top = salesClimbers.sort((a, b) => (b.m.now - b.m.prev) - (a.m.now - a.m.prev))[0];
+    wins.push({ score: 75 + (top.m.now - top.m.prev) * 5, icon: "\ud83d\ude80", tone: "good", label: "Biggest climber",
+      detail: `${tdName(top.r)} went from ${top.m.prev} sale${top.m.prev === 1 ? "" : "s"} last week to ${top.m.now} this week.`,
+      metric: `${top.m.prev} → ${top.m.now} sales` });
+  } else {
+    const climbers = rows.map((r) => ({ r, c: tdWow(r) })).filter((m) => m.c !== null && m.c >= 0.2);
+    if (climbers.length) {
+      const top = climbers.sort((a, b) => b.c - a.c)[0];
+      wins.push({ score: 70 + top.c * 20, icon: "\ud83d\ude80", tone: "good", label: "Filling the pipeline",
+        detail: `${tdName(top.r)} went from ${top.r.stopbacks_prev_week} stop backs last week to ${top.r.stopbacks_week} this week — sales usually follow.`,
+        metric: `\u2191 ${Math.round(top.c * 100)}%` });
     }
   }
 
-  // 3) Best time of day (from real sale timestamps, viewer-local hours).
-  const myWindow = bestSaleWindow(me.sale_times_month);
-  if (myWindow) {
-    items.push({
-      icon: "⏰",
-      label: "Your window",
-      detail: `You close most between ${hourLabel(myWindow.start)}–${hourLabel(myWindow.end)}. Load your route there.`,
-    });
-  } else {
-    // Not enough of the rep's own sales? Show the team's peak window.
-    const allTimes = rows.flatMap((r) => r.sale_times_month || []);
-    const teamWindow = bestSaleWindow(allTimes);
-    if (teamWindow)
-      items.push({ icon: "⏰", label: "Team's window", detail: `The crew closes most between ${hourLabel(teamWindow.start)}–${hourLabel(teamWindow.end)}.` });
+  const rated = rows.filter((r) => tdCloseRate(r) !== null);
+  if (rated.length >= 2) {
+    const best = [...rated].sort((a, b) => tdCloseRate(b) - tdCloseRate(a))[0];
+    wins.push({ score: 60, icon: "\ud83c\udfaf", tone: "good", label: "Best closer",
+      detail: `${tdName(best)} is closing ${tdPct(tdCloseRate(best))} of decided closings — crew runs ${tdPct(crewClose)}.`,
+      metric: tdPct(tdCloseRate(best)) });
   }
 
-  return items;
+  // Concentration: one rep carrying an outsized share of the crew's sales is
+  // a fact a lead needs, good news and risk at the same time.
+  if (rows.length >= 3 && teamSales >= 10) {
+    const share = rows.map((r) => ({ r, s: (r.sales_month || 0) / teamSales })).sort((a, b) => b.s - a.s)[0];
+    if (share.s >= 0.35)
+      wins.push({ score: 65, icon: "\ud83c\udfcb\ufe0f", tone: "good", label: "Carrying the crew",
+        detail: `${tdName(share.r)} booked ${share.r.sales_month} of the crew's ${teamSales} sales this month.`,
+        metric: tdPct(share.s) + " of sales" });
+  }
+
+  const streaks = rows.filter((r) => (r.current_streak || 0) >= 3)
+    .sort((a, b) => b.current_streak - a.current_streak);
+  if (streaks.length)
+    wins.push({ score: 40, icon: "\ud83d\udd25", tone: "good", label: "Longest streak",
+      detail: `${tdName(streaks[0])} has logged something every day for ${streaks[0].current_streak} days running.`,
+      metric: `${streaks[0].current_streak} days` });
+
+  // Crew-level momentum, so a small team with no standout rep still gets a
+  // read. Needs 2+ reps — "the whole crew" is a strange thing to tell someone
+  // who is the whole crew.
+  const wowTeam = rows.length >= 2 ? tdDelta(rows, "sales_week", "sales_prev_week") : null;
+  if (wowTeam !== null && wowTeam >= 0.2)
+    wins.push({ score: 55, icon: "\ud83d\udcc8", tone: "good", label: "Crew is trending up",
+      detail: `The whole crew booked ${tdSum(rows, "sales_week")} sales this week against ${tdSum(rows, "sales_prev_week")} last week.`,
+      metric: `\u2191 ${Math.round(wowTeam * 100)}%` });
+
+  return {
+    attention: attention.sort((a, b) => b.score - a.score).slice(0, 3),
+    wins: wins.sort((a, b) => b.score - a.score).slice(0, 3),
+  };
+}
+
+// One signal row: icon + label + the number behind it + the plain sentence.
+function tdSignalRowHtml(s) {
+  return `<div class="ti-row td-sig">
+      <span class="ti-icon tone-${s.tone}">${s.icon}</span>
+      <div class="ti-text">
+        <strong>${escapeHtml(s.label)}${s.metric ? ` <span class="td-sig-metric tone-${s.tone}">${escapeHtml(s.metric)}</span>` : ""}</strong>
+        <span class="muted small">${escapeHtml(s.detail)}</span>
+      </div>
+    </div>`;
+}
+
+// ---- Rep scorecard ------------------------------------------------------
+// Nine reps is past the point where color can carry identity, so the crew
+// comparison is a table (with an inline effort bar per row, emphasis-styled
+// on the viewer). Sortable by any column.
+let tdSort = { key: "sales_month", dir: -1 };
+
+function tdScorecardHtml(rows) {
+  const decided = (r) => (r.sales_month || 0) + (r.missed_month || 0);
+  const closeOf = (r) => (decided(r) >= TEAM_CLOSE_MIN ? r.sales_month / decided(r) : null);
+  const maxSb = Math.max(1, ...rows.map((r) => r.stopbacks_month || 0));
+
+  const val = (r, k) => (k === "close" ? (closeOf(r) === null ? -1 : closeOf(r)) : (r[k] || 0));
+  const sorted = [...rows].sort((a, b) => (val(a, tdSort.key) - val(b, tdSort.key)) * tdSort.dir
+    || tdName(a).localeCompare(tdName(b)));
+
+  const cols = [
+    { k: "contacts_month", label: "Contacts" },
+    { k: "stopbacks_month", label: "Stop backs" },
+    { k: "sales_month", label: "Sales" },
+    { k: "close", label: "Close %" },
+  ];
+
+  const head = `<tr><th scope="col" class="td-sc-name">Rep</th>${cols.map((c) =>
+    `<th scope="col"><button type="button" class="td-sc-sort ${tdSort.key === c.k ? "is-on" : ""}" data-sort="${c.k}"
+        aria-label="Sort by ${c.label}">${c.label}${tdSort.key === c.k ? (tdSort.dir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("")}</tr>`;
+
+  const body = sorted.map((r) => {
+    const cr = closeOf(r);
+    const sb = r.stopbacks_month || 0;
+    return `<tr class="${r.is_self ? "is-self" : ""}">
+      <th scope="row" class="td-sc-name">
+        <span class="td-sc-who">${escapeHtml(tdName(r))}${r.role === "owner" ? ' <span class="tm-crown" title="Team owner">👑</span>' : ""}</span>
+        <span class="td-sc-effort" aria-hidden="true"><i style="width:${(sb / maxSb) * 100}%"></i></span>
+      </th>
+      <td>${(r.contacts_month || 0).toLocaleString()}</td>
+      <td>${sb.toLocaleString()}</td>
+      <td><b>${(r.sales_month || 0).toLocaleString()}</b></td>
+      <td>${cr === null ? `<span class="muted" title="Needs ${TEAM_CLOSE_MIN} decided closings">—</span>` : tdPct(cr)}</td>
+    </tr>`;
+  }).join("");
+
+  return `<div class="td-scroll"><table class="td-sc">
+      <caption class="td-cap">Last 30 days · tap a column to sort</caption>
+      <thead>${head}</thead><tbody>${body}</tbody>
+    </table></div>`;
+}
+
+// ---- Tab renderers ------------------------------------------------------
+function tdCard(title, note, inner) {
+  return `<section class="td-card">
+      <h3 class="td-card-title">${escapeHtml(title)}</h3>
+      ${note ? `<p class="td-note">${note}</p>` : ""}
+      ${inner}
+    </section>`;
+}
+
+function tdOverviewHtml(rows) {
+  const sales = tdSum(rows, "sales_month");
+  const sbs = tdSum(rows, "stopbacks_month");
+  const contacts = tdSum(rows, "contacts_month");
+  const missed = tdSum(rows, "missed_month");
+  const close = tdRate(sales, sales + missed);
+  const activeWeek = rows.filter((r) => (r.stopbacks_week || 0) > 0 || (r.sales_week || 0) > 0).length;
+
+  const kpis = [
+    { label: "Team sales", value: sales, delta: tdDelta(rows, "sales_week", "sales_prev_week"), hero: true },
+    { label: "Stop backs", value: sbs, delta: tdDelta(rows, "stopbacks_week", "stopbacks_prev_week") },
+    { label: "Close rate", value: tdPct(close), raw: true,
+      sub: `${sales} of ${sales + missed} decided` },
+    { label: "Active reps", value: `${activeWeek}/${rows.length}`, raw: true, sub: "logged this week" },
+  ];
+
+  const tiles = kpis.map((k) => `
+    <div class="td-kpi ${k.hero ? "is-hero" : ""}">
+      <span class="td-kpi-lab">${escapeHtml(k.label)}</span>
+      <span class="td-kpi-val">${k.raw ? k.value : k.value.toLocaleString()}</span>
+      ${k.delta !== undefined ? tdDeltaHtml(k.delta) : `<span class="td-delta is-flat">${escapeHtml(k.sub || "")}</span>`}
+    </div>`).join("");
+
+  const funnel = contacts + sbs + sales === 0
+    ? `<p class="empty-hint" style="margin:0">Nothing logged in the last 30 days yet.</p>`
+    : tdFunnelHtml([
+        { label: "Contacts", value: contacts },
+        { label: "Stop backs", value: sbs },
+        { label: "Sales", value: sales },
+      ]) + (missed
+        ? `<p class="td-foot"><span class="td-dot td-dot-miss"></span>${missed} missed closing${missed === 1 ? "" : "s"} in the same window — the branch that didn't convert.</p>`
+        : "");
+
+  return `<div class="td-kpis">${tiles}</div>
+    ${tdCard("Crew funnel", "Last 30 days, whole team. Each stage is what survived the one above it.", funnel)}`;
+}
+
+function tdCrewHtml(rows) {
+  const { attention, wins } = tdSignals(rows);
+
+  const group = (title, list, empty) => `
+    <div class="td-siggroup">
+      <h4 class="td-sig-head">${escapeHtml(title)}</h4>
+      ${list.length
+        ? `<div class="ti-rows">${list.map(tdSignalRowHtml).join("")}</div>`
+        : `<p class="empty-hint td-sig-empty">${escapeHtml(empty)}</p>`}
+    </div>`;
+
+  const sig =
+    group("Needs a look", attention, "Nobody's slipping this week — the whole crew is active.") +
+    group("Worth calling out", wins, "No standout wins yet this month.");
+
+  return tdCard("Crew signals",
+      "Activity patterns from the last 30 days. What to do about them is your call.", sig)
+    + tdCard("Rep scorecard", "", tdScorecardHtml(rows));
+}
+
+function tdTimingHtml(rows) {
+  const allTimes = rows.flatMap((r) => r.sale_times_month || []);
+  const peak = bestSaleWindow(allTimes);
+  const hoursNote = peak
+    ? `The crew closes most between <b>${hourLabel(peak.start)}–${hourLabel(peak.end)}</b> — ${peak.count} of ${allTimes.length} sales in the last 30 days.`
+    : `Not enough timestamped sales yet to call a peak window.`;
+  const hours = allTimes.length
+    ? tdHoursHtml(allTimes, peak)
+    : `<p class="empty-hint" style="margin:0">No timestamped sales in the last 30 days yet.</p>`;
+
+  return tdCard("Closing windows", hoursNote, hours)
+    + tdCard("Team sales, last 30 days", "One point per day, whole crew.", tdTrendHtml(allTimes));
+}
+
+// ---- Your read (the rep's own tab) --------------------------------------
+// Where you actually stand against the crew, stage by stage. Comparisons use
+// the REST of the crew as the benchmark, not the crew including you — being
+// measured against a number you're inside of makes a solo strong month look
+// like an average one.
+
+// Paired bars: your rate against the rest of the crew's, on one scale, both
+// direct-labeled. Emphasis form — yours is the accent, theirs recedes — so
+// the comparison never depends on telling two colors apart.
+function tdVersusHtml(items) {
+  return `<div class="td-vs">${items.map((it) => {
+    const max = Math.max(it.mine || 0, it.crew || 0, 0.0001);
+    const w = (v) => Math.max(2, ((v || 0) / max) * 100);
+    const better = it.crew !== null && it.mine !== null && it.mine >= it.crew;
+    return `<div class="td-vs-item">
+        <div class="td-vs-top">
+          <span class="td-vs-label">${escapeHtml(it.label)}</span>
+          ${it.mine === null || it.crew === null ? ""
+            : `<span class="td-vs-gap ${better ? "is-up" : "is-down"}">${better ? "\u2191" : "\u2193"} ${Math.abs(Math.round((it.mine - it.crew) * 1000) / 10)} pts</span>`}
+        </div>
+        ${it.mine === null
+          ? `<p class="td-vs-none">Not enough of your own data yet.</p>`
+          : `<div class="td-vs-row">
+               <span class="td-vs-who">You</span>
+               <span class="td-vs-track"><i class="td-vs-bar is-mine" style="width:${w(it.mine)}%"></i></span>
+               <b class="td-vs-val">${tdPct(it.mine, 1)}</b>
+             </div>`}
+        ${it.crew === null
+          ? ""   /* the card note already explains why there's no benchmark —
+                    repeating it under every bar just adds noise */
+          : `<div class="td-vs-row">
+               <span class="td-vs-who">Crew</span>
+               <span class="td-vs-track"><i class="td-vs-bar is-crew" style="width:${w(it.crew)}%"></i></span>
+               <b class="td-vs-val">${tdPct(it.crew, 1)}</b>
+             </div>`}
+      </div>`;
+  }).join("")}</div>`;
+}
+
+function tdYouHtml(rows) {
+  const me = rows.find((r) => r.is_self);
+  if (!me) return tdCard("Your read", "", `<p class="empty-hint" style="margin:0">Join a team to see how you're tracking. \ud83d\udcc8</p>`);
+
+  const peers = rows.filter((r) => !r.is_self);
+  const hasPeers = peers.length > 0;
+
+  // --- Standing: rank on sales and on effort, plus the gap to the rep above.
+  const salesRank = tdRankOf(rows, me, (r) => r.sales_month || 0);
+  const effortRank = tdRankOf(rows, me, (r) => r.stopbacks_month || 0);
+  const ahead = [...rows].sort((a, b) => (b.sales_month || 0) - (a.sales_month || 0))
+    .filter((r) => (r.sales_month || 0) > (me.sales_month || 0)).pop();   // nearest above
+  const behind = [...rows].sort((a, b) => (b.sales_month || 0) - (a.sales_month || 0))
+    .filter((r) => (r.sales_month || 0) < (me.sales_month || 0))[0];      // nearest below
+
+  let gapLine;
+  if (!hasPeers) gapLine = "You're the only one on the crew so far.";
+  else if (ahead) {
+    const need = (ahead.sales_month || 0) - (me.sales_month || 0);
+    gapLine = `${need} more sale${need === 1 ? "" : "s"} this month passes ${escapeHtml(tdName(ahead))}.`;
+  } else if (behind) {
+    const lead = (me.sales_month || 0) - (behind.sales_month || 0);
+    gapLine = `You're top of the crew on sales — ${lead} clear of ${escapeHtml(tdName(behind))}.`;
+  } else gapLine = "The crew is dead level on sales this month.";
+
+  const standing = `
+    <div class="td-standing">
+      <div class="td-rankbox">
+        <span class="td-rank-val">${salesRank ? tdOrdinal(salesRank) : "\u2014"}</span>
+        <span class="td-rank-lab">on sales</span>
+      </div>
+      <div class="td-rankbox">
+        <span class="td-rank-val">${effortRank ? tdOrdinal(effortRank) : "\u2014"}</span>
+        <span class="td-rank-lab">on stop backs</span>
+      </div>
+      <div class="td-rankbox is-wide">
+        <span class="td-rank-lab">of ${rows.length} rep${rows.length === 1 ? "" : "s"}, last 30 days</span>
+        <span class="td-rank-gap">${gapLine}</span>
+      </div>
+    </div>`;
+
+  // --- Stage-by-stage comparison against the rest of the crew.
+  const crewClose = hasPeers
+    ? tdRate(tdSum(peers, "sales_month"), tdSum(peers, "sales_month") + tdSum(peers, "missed_month"))
+    : null;
+  const versus = tdVersusHtml([
+    { label: "Contacts that became stop backs", mine: tdDoorRate(me), crew: hasPeers ? tdPooled(peers, "stopbacks_month", "contacts_month") : null },
+    { label: "Stop backs that became sales", mine: tdConvRate(me), crew: hasPeers ? tdPooled(peers, "sales_month", "stopbacks_month") : null },
+    { label: "Close rate on decided closings", mine: tdCloseRate(me), crew: crewClose },
+  ]);
+
+  // --- The plain-language rows: momentum, and where you're strongest.
+  const items = [];
+  // Momentum reads on SALES first — that's the number a week is judged by.
+  // Stop backs only stand in when this week's and last week's sales are both
+  // too small to say anything.
+  const myMove = tdSalesMove(me);
+  if (myMove) {
+    items.push({ icon: myMove.dir > 0 ? "\ud83d\udcc8" : "\ud83d\udcc9", tone: myMove.dir > 0 ? "good" : "warn",
+      label: "Your momentum", metric: `${myMove.prev} → ${myMove.now} sales`,
+      detail: myMove.dir > 0
+        ? `${myMove.now} sale${myMove.now === 1 ? "" : "s"} this week against ${myMove.prev} last week — that's the direction.`
+        : `${myMove.now} sale${myMove.now === 1 ? "" : "s"} this week against ${myMove.prev} last week.` });
+  } else if ((me.sales_week || 0) < 2 && (me.sales_prev_week || 0) < 2) {
+    const wow = tdWow(me);
+    if (wow !== null && Math.abs(wow) >= 0.1) {
+      const p = Math.round(Math.abs(wow) * 100);
+      items.push({ icon: wow > 0 ? "\ud83d\udcc8" : "\ud83d\udcc9", tone: wow > 0 ? "good" : "warn",
+        label: "Pipeline momentum", metric: `${wow > 0 ? "\u2191" : "\u2193"} ${p}%`,
+        detail: `${me.stopbacks_week} stop backs this week against ${me.stopbacks_prev_week} last week.` });
+    }
+  }
+
+  // Your strongest and weakest funnel stage vs the crew — the one thing most
+  // worth knowing, stated as a fact about the numbers.
+  if (hasPeers) {
+    const stages = [
+      { name: "turning contacts into stop backs", mine: tdDoorRate(me), crew: tdPooled(peers, "stopbacks_month", "contacts_month") },
+      { name: "turning stop backs into sales", mine: tdConvRate(me), crew: tdPooled(peers, "sales_month", "stopbacks_month") },
+      { name: "closing what you work", mine: tdCloseRate(me), crew: crewClose },
+    ].filter((s) => s.mine !== null && s.crew !== null && s.crew > 0);
+    if (stages.length) {
+      const ranked = [...stages].sort((a, b) => (b.mine / b.crew) - (a.mine / a.crew));
+      const best = ranked[0], worst = ranked[ranked.length - 1];
+      if (best.mine >= best.crew)
+        items.push({ icon: "\u2b50", tone: "good", label: "Your strongest stage",
+          detail: `You're ahead of the crew at ${best.name} — ${tdPct(best.mine, 1)} against ${tdPct(best.crew, 1)}.` });
+      if (ranked.length > 1 && worst.mine < worst.crew)
+        items.push({ icon: "\ud83d\udd0e", tone: "warn", label: "Where the crew is ahead",
+          detail: `The crew runs ${tdPct(worst.crew, 1)} at ${worst.name}; you're at ${tdPct(worst.mine, 1)}.` });
+    }
+  }
+
+  const myWindow = bestSaleWindow(me.sale_times_month);
+  if (myWindow)
+    items.push({ icon: "\u23f0", tone: "good", label: "Your window", metric: `${hourLabel(myWindow.start)}\u2013${hourLabel(myWindow.end)}`,
+      detail: `${myWindow.count} of your last ${(me.sale_times_month || []).length} sales landed in that block.` });
+
+  if ((me.current_streak || 0) >= 2)
+    items.push({ icon: "\ud83d\udd25", tone: "good", label: "Your streak", metric: `${me.current_streak} days`,
+      detail: `You've logged something every day for ${me.current_streak} days running.` });
+
+  const readRows = items.length
+    ? `<div class="ti-rows">${items.map(tdSignalRowHtml).join("")}</div>`
+    : `<p class="empty-hint" style="margin:0">Keep logging — your read fills in as the month builds. \ud83d\udcc8</p>`;
+
+  return tdCard("Where you stand", "", standing)
+    + tdCard("You vs the crew", hasPeers
+        ? "Your conversion at each stage against everyone else on the crew."
+        : "Benchmarks appear once someone else joins the crew.", versus)
+    + tdCard("Your read", "", readRows)
+    + tdCard("Your last 30 days", "", tdFunnelHtml([
+        { label: "Contacts", value: me.contacts_month || 0 },
+        { label: "Stop backs", value: me.stopbacks_month || 0 },
+        { label: "Sales", value: me.sales_month || 0 },
+      ]));
+}
+
+// ---- Heat map tab -------------------------------------------------------
+// Territory heat: where doors open and where sales land, drawn as ~275 m
+// grid cells over the same basemap the Leads map uses. Deliberately never
+// shows an individual house — team data arrives from get_team_heat()
+// already binned server-side (migration 7), and the pre-migration fallback
+// bins the viewer's own leads client-side with the same grid.
+const TD_HEAT_BIN = 0.0025;                 // must match migration 7
+let tdHeatKind = "contacts";                // contacts | sales
+let tdHeatCache = { teamId: null, bins: null, scope: "self" };
+let tdHeatMap = null;                       // Leaflet instance for the tab
+let tdHeatLayer = null;
+
+// Client-side fallback: bin MY leads on the same grid the server uses.
+function tdSelfHeatBins() {
+  const cutoff = Date.now() - 90 * 86400000;
+  const cells = new Map();
+  (state.leads || []).forEach((l) => {
+    if (l.lat == null || l.lng == null) return;
+    if (new Date(l.createdAt).getTime() < cutoff) return;
+    const la = Math.floor(l.lat / TD_HEAT_BIN) * TD_HEAT_BIN + TD_HEAT_BIN / 2;
+    const ln = Math.floor(l.lng / TD_HEAT_BIN) * TD_HEAT_BIN + TD_HEAT_BIN / 2;
+    const k = la + "," + ln;
+    const c = cells.get(k) || { lat_bin: la, lng_bin: ln, contacts: 0, sales: 0 };
+    c.contacts++;
+    if (l.status === "sale") c.sales++;
+    cells.set(k, c);
+  });
+  return [...cells.values()];
+}
+
+async function tdLoadHeat() {
+  if (tdHeatCache.teamId === activeTeamId && tdHeatCache.bins) return tdHeatCache;
+  let bins = null, scope = "team";
+  try { bins = await dbGetTeamHeat(activeTeamId); } catch (_) { bins = null; }
+  if (bins === null) { bins = tdSelfHeatBins(); scope = "self"; }   // migration 7 not run yet
+  tdHeatCache = { teamId: activeTeamId, bins, scope };
+  return tdHeatCache;
+}
+
+function tdHeatHtml() {
+  return `<section class="td-card td-heatcard">
+      <h3 class="td-card-title">Territory heat</h3>
+      <p class="td-note" id="td-heat-note">Where the crew's tagged doors cluster, last 90 days. No individual houses — each cell is a ~275 m block.</p>
+      <div class="td-heat-toggle" role="tablist" aria-label="Heat metric">
+        <button type="button" class="chip td-heat-chip is-on" data-heatkind="contacts" aria-pressed="true">Contacts</button>
+        <button type="button" class="chip td-heat-chip" data-heatkind="sales" aria-pressed="false">Sales</button>
+      </div>
+      <div id="td-heatmap" class="td-heatmap"></div>
+      <div class="td-heat-legend" id="td-heat-legend" hidden>
+        <span>fewer</span><span class="td-heat-grad" id="td-heat-grad"></span><span>more</span>
+      </div>
+      <p class="td-foot" id="td-heat-foot"></p>
+    </section>`;
+}
+
+// (Re)draw just the overlay for the active metric on the existing map.
+function tdDrawHeat(bins) {
+  if (!tdHeatMap) return;
+  if (tdHeatLayer) { tdHeatMap.removeLayer(tdHeatLayer); tdHeatLayer = null; }
+  const val = (b) => (tdHeatKind === "sales" ? b.sales : b.contacts);
+  const active = bins.filter((b) => val(b) > 0);
+  const legend = document.getElementById("td-heat-legend");
+  const foot = document.getElementById("td-heat-foot");
+  if (!active.length) {
+    if (legend) legend.hidden = true;
+    if (foot) foot.textContent = tdHeatKind === "sales"
+      ? "No tagged sales in the last 90 days yet."
+      : "No tagged doors in the last 90 days yet.";
+    return;
+  }
+  const max = Math.max(...active.map(val));
+  // Sales heat is amber (the app's sales color), contacts green. The two are
+  // never on screen together — the pressed chip names the metric.
+  const color = tdHeatKind === "sales" ? "#b9791f" : "#227d47";
+  const h = TD_HEAT_BIN / 2;
+  tdHeatLayer = L.layerGroup(active.map((b) => {
+    const v = val(b);
+    // sqrt spreads low counts apart — with a linear scale one hot block
+    // makes every other cell near-invisible.
+    const t = Math.sqrt(v / max);
+    return L.rectangle(
+      [[b.lat_bin - h, b.lng_bin - h], [b.lat_bin + h, b.lng_bin + h]],
+      { stroke: false, fillColor: color, fillOpacity: 0.15 + 0.55 * t, interactive: true }
+    ).bindTooltip(`${v} ${tdHeatKind === "sales" ? "sale" : "contact"}${v === 1 ? "" : "s"}`, { direction: "top" });
+  })).addTo(tdHeatMap);
+  if (legend) {
+    legend.hidden = false;
+    const grad = document.getElementById("td-heat-grad");
+    if (grad) grad.style.background = `linear-gradient(to right, ${color}26, ${color}b3)`;
+  }
+  const total = active.reduce((s, b) => s + val(b), 0);
+  if (foot) foot.textContent = `${total} tagged ${tdHeatKind === "sales" ? "sale" : "contact"}${total === 1 ? "" : "s"} across ${active.length} blocks. Hottest block: ${max}.`;
+}
+
+async function tdMountHeat() {
+  const el = document.getElementById("td-heatmap");
+  if (!el) return;
+  if (typeof L === "undefined") {
+    el.outerHTML = `<p class="empty-hint">Map failed to load (no connection?)</p>`;
+    return;
+  }
+  const { bins, scope } = await tdLoadHeat();
+  const note = document.getElementById("td-heat-note");
+  if (note && scope === "self")
+    note.textContent = "Your tagged doors, last 90 days — crew-wide heat unlocks once migration 7 runs on the shared database. No individual houses; each cell is a ~275 m block.";
+
+  // The tab re-render may have destroyed a previous map's container.
+  if (tdHeatMap) { tdHeatMap.remove(); tdHeatMap = null; tdHeatLayer = null; }
+  if (!bins.length) {
+    el.outerHTML = `<p class="empty-hint">No GPS-tagged doors yet. Tag houses with \ud83d\udccd when logging a stop back and the heat map fills in.</p>`;
+    const foot = document.getElementById("td-heat-foot");
+    if (foot) foot.textContent = "";
+    return;
+  }
+  tdHeatMap = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 17 });
+  const s = MAP_STYLES.standard;
+  L.tileLayer(s.url, { maxZoom: 17, attribution: s.attribution, className: s.className }).addTo(tdHeatMap);
+  const pts = bins.map((b) => [b.lat_bin, b.lng_bin]);
+  tdHeatMap.fitBounds(L.latLngBounds(pts).pad(0.25));
+  tdDrawHeat(bins);
+  // The container was hidden a tick ago; Leaflet needs a size poke.
+  setTimeout(() => { if (tdHeatMap) tdHeatMap.invalidateSize(); }, 0);
+
+  document.querySelectorAll(".td-heat-chip").forEach((chip) => {
+    chip.onclick = () => {
+      tdHeatKind = chip.dataset.heatkind;
+      document.querySelectorAll(".td-heat-chip").forEach((c) => {
+        const on = c === chip;
+        c.classList.toggle("is-on", on);
+        c.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      tdDrawHeat(bins);
+    };
+  });
+}
+
+function renderTeamDash() {
+  const rows = teamOverview || [];
+  const body = document.getElementById("tin-body");
+  if (!body) return;
+
+  if (!rows.length) {
+    body.innerHTML = `<p class="empty-hint" style="margin:0">No crew data yet. Share your join code and the dashboard fills in. 📈</p>`;
+    return;
+  }
+
+  // Leaving the heat tab (or re-rendering it) destroys the Leaflet
+  // container — drop the instance so it isn't left pointing at dead DOM.
+  if (tdHeatMap) { tdHeatMap.remove(); tdHeatMap = null; tdHeatLayer = null; }
+
+  body.innerHTML =
+    tdTab === "crew" ? tdCrewHtml(rows) :
+    tdTab === "timing" ? tdTimingHtml(rows) :
+    tdTab === "you" ? tdYouHtml(rows) :
+    tdTab === "heat" ? tdHeatHtml() :
+    tdOverviewHtml(rows);
+
+  if (tdTab === "heat") tdMountHeat();   // async: fetch bins, then draw
+
+  // Sortable scorecard headers repaint just this tab.
+  body.querySelectorAll(".td-sc-sort").forEach((btn) => {
+    btn.onclick = () => {
+      const k = btn.dataset.sort;
+      if (tdSort.key === k) tdSort.dir *= -1;
+      else tdSort = { key: k, dir: -1 };
+      renderTeamDash();
+    };
+  });
 }
 
 function openTeamInsights() {
-  const items = computeTeamInsights(teamOverview || []);
-  const body = document.getElementById("tin-body");
-  body.innerHTML = items.length
-    ? items.map((it) => `
-        <div class="ti-row">
-          <span class="ti-icon">${it.icon}</span>
-          <div class="ti-text"><strong>${it.label}</strong><span class="muted small">${it.detail}</span></div>
-        </div>`).join("")
-    : `<p class="empty-hint" style="margin:0">Not enough data yet — keep logging and team insights will show up here. 📈</p>`;
+  const team = activeTeam();
+  const logo = document.getElementById("tin-logo");
+  if (team) {
+    document.getElementById("tin-title").textContent = team.name;
+    logo.classList.toggle("has-logo", !!team.logo_url);
+    logo.innerHTML = team.logo_url
+      ? `<img src="${escapeHtml(team.logo_url)}" alt="${escapeHtml(team.name)} logo">` : "🏢";
+    const n = (teamOverview || []).length;
+    document.getElementById("tin-sub").textContent =
+      `Crew performance · ${n} rep${n === 1 ? "" : "s"} · last 30 days`;
+  }
+  tdTab = "overview";
+  document.querySelectorAll("#tin-tabs .td-tab").forEach((b) => {
+    const on = b.dataset.tdtab === "overview";
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  renderTeamDash();
   openModal("team-insights-modal");
 }
 
@@ -3073,6 +3785,46 @@ function wireEvents() {
   document.getElementById("ti-x").addEventListener("click", () => closeModal("team-info-modal"));
   document.getElementById("tin-close").addEventListener("click", () => closeModal("team-insights-modal"));
   document.getElementById("tin-x").addEventListener("click", () => closeModal("team-insights-modal"));
+
+  // Team Intelligence: tab switching.
+  document.getElementById("tin-tabs").addEventListener("click", (e) => {
+    const btn = e.target.closest(".td-tab");
+    if (!btn) return;
+    tdTab = btn.dataset.tdtab;
+    document.querySelectorAll("#tin-tabs .td-tab").forEach((b) => {
+      const on = b === btn;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    renderTeamDash();
+  });
+
+  // Shared chart tooltip: any mark carrying data-tip shows it on hover/tap.
+  // One delegated listener covers every chart, SVG marks included.
+  const tip = document.getElementById("tin-tip");
+  const dash = document.getElementById("team-insights-modal");
+  const showTip = (el) => {
+    const text = el.getAttribute("data-tip");
+    if (!text) return;
+    tip.textContent = text;
+    tip.hidden = false;
+    // Position against the tooltip's own containing block (.modal-dash), not
+    // the overlay — they're different boxes, and using the wrong one puts the
+    // tip off by the modal's offset.
+    const box = (tip.offsetParent || dash).getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    // Clamp inside the modal so a tooltip near the edge never clips.
+    const x = Math.min(Math.max(r.left + r.width / 2 - box.left, 60), box.width - 60);
+    tip.style.left = x + "px";
+    tip.style.top = Math.max(r.top - box.top - 8, 8) + "px";
+  };
+  const hideTip = () => { tip.hidden = true; };
+  dash.addEventListener("pointermove", (e) => {
+    const mark = e.target.closest("[data-tip]");
+    if (mark) showTip(mark); else hideTip();
+  });
+  dash.addEventListener("pointerleave", hideTip);
+  dash.addEventListener("scroll", hideTip, true);
   document.getElementById("te-x").addEventListener("click", () => closeModal("team-edit-modal"));
   document.getElementById("te-cancel").addEventListener("click", () => closeModal("team-edit-modal"));
 

@@ -236,6 +236,15 @@ async function dbGetTeamOverview(teamId) {
   return data || [];
 }
 
+// Binned door/sale density for the Heat map tab (migration 7). Returns null —
+// not throw — when the RPC doesn't exist yet, so the tab can fall back to a
+// self-only heat from local leads until the migration is run.
+async function dbGetTeamHeat(teamId) {
+  const { data, error } = await sb.rpc("get_team_heat", { p_team: teamId });
+  if (error) return null;
+  return data || [];
+}
+
 // Team info + edit (migration 6). Ownership is enforced server-side.
 async function dbGetTeamMembers(teamId) {
   const { data, error } = await sb.rpc("get_team_members", { p_team: teamId });
