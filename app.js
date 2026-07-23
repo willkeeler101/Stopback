@@ -12,7 +12,7 @@ const DEFAULT_STATE = {
   contactsTodayCount: 0,   // today's "+1" taps (loaded from log_events)
   leads: [],               // full stop-back records
   activeDays: [],          // "YYYY-MM-DD" strings — used for streaks
-  profile: { name: "", dailyGoal: 5, salesGoal: 2 },
+  profile: { name: "", dailyGoal: 5, salesGoal: 2, weeklySalesGoal: null },
   // Historical totals from before using the app — added on top of live data.
   baseline: { contacts: 0, stopbacks: 0, missed: 0, sales: 0 },
   products: [],            // things you sell (for the brochure)
@@ -142,6 +142,12 @@ function salesToday() {
   return state.leads.filter(
     (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === t
   ).length;
+}
+
+// Weekly sales goal: explicit if the rep set one, else 6 workdays × daily goal.
+// (0/null both mean "unset" — mirrors how dailyGoal <= 0 disables its ring.)
+function weeklySalesGoal() {
+  return state.profile.weeklySalesGoal || (state.profile.salesGoal || 0) * 6;
 }
 
 // =====================================================================
@@ -2386,6 +2392,8 @@ function renderProfile() {
   document.getElementById("p-name").value = state.profile.name;
   document.getElementById("p-goal").value = state.profile.dailyGoal;
   document.getElementById("p-sales-goal").value = state.profile.salesGoal;
+  // Empty shows the placeholder → the 6× daily fallback is in effect.
+  document.getElementById("p-week-goal").value = state.profile.weeklySalesGoal || "";
   buildShowcase();
 
   // Level + XP
@@ -2965,6 +2973,12 @@ function wireEvents() {
     state.profile.salesGoal = parseInt(e.target.value, 10) || 0;
     save();
     saveProfileDebounced({ daily_sales_goal: state.profile.salesGoal });
+  });
+  document.getElementById("p-week-goal").addEventListener("input", (e) => {
+    // Blank → null → the 6× daily fallback (weeklySalesGoal()).
+    state.profile.weeklySalesGoal = parseInt(e.target.value, 10) || null;
+    save();
+    saveProfileDebounced({ weekly_sales_goal: state.profile.weeklySalesGoal });
   });
 
   // Import-past-stats inputs. We update totals everywhere but DON'T re-render

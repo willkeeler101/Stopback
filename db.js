@@ -61,6 +61,9 @@ async function dbLoadState() {
       name: profile.display_name || "",
       dailyGoal: profile.daily_goal || 5,
       salesGoal: profile.daily_sales_goal == null ? 2 : profile.daily_sales_goal,
+      // Nullable on purpose: null = "unset", client falls back to salesGoal * 6.
+      // Pre-migration-7 rows simply lack the column → undefined → null.
+      weeklySalesGoal: profile.weekly_sales_goal == null ? null : profile.weekly_sales_goal,
     };
     s.baseline = {
       contacts: profile.baseline_contacts || 0,
