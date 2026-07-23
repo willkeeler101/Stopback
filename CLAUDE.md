@@ -164,6 +164,12 @@ Keep this aesthetic in ALL future work — it's the brand.
    supabase-js CDN → config → supabase → auth → db → app.
 6. **No AI selling advice in the feed.** The Hit List tells the rep WHO to
    contact, not HOW to sell.
+7. **Pull requests carry the context.** Open them with `gh pr create` and a
+   full body written in the command — never blank, never browser-authored.
+   Five sections: What this adds / Design decisions / Backend (which
+   `supabase/*.sql`, and whether it has been run on the **shared** DB) /
+   Testing (what was actually verified) / Files. Descriptive title, not the
+   branch name. Full template: CONTRIBUTING.md → "Open a Pull Request".
 
 ## Pending / known loose ends
 - **One-time importer** (localStorage → Supabase) not built yet; the user's

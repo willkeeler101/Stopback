@@ -50,9 +50,51 @@ git push -u origin yourname/short-feature-name
 
 ## Open a Pull Request
 
-On GitHub: "Compare & pull request" → describe what changed → open PR.
+Open it from the terminal with `gh` and **write the body in the command** —
+don't open it in the browser and don't leave the description blank:
+
+```bash
+gh pr create --title "Descriptive title, not the branch name" --body "$(cat <<'EOF'
+## What this adds
+...
+EOF
+)"
+```
+
 Get at least a quick look-over from another contributor before merging —
 don't merge your own PR solo.
+
+### What goes in the body
+
+The PR description is how the rest of us find out what changed without
+reading the diff — and it's the only record of *why* once the branch is
+gone. Every PR gets these five sections:
+
+| Section | What it answers |
+| --- | --- |
+| **What this adds** | Numbered list, feature names bolded — what a user actually sees, not which functions moved. |
+| **Design decisions** | The choices you made and the reasoning. This is the part that's genuinely gone if you skip it. |
+| **Backend** | Any `supabase/*.sql` file: which one, **whether it's been run on the shared DB**, and that it's additive/safe to re-run. Write "none" if there's no SQL. |
+| **Testing** | What you actually verified — browser smoke test, `node --check`, which scenarios. What you *didn't* test counts too. |
+| **Files** | The files touched, new ones marked `(new)`. |
+
+The **Backend** section is the one that matters most here — we share one
+live database, so "migration 7 is in this PR and has NOT been run yet" is
+the single most important line a reviewer can read. See PRs
+[#2](../../pull/2) and [#4](../../pull/4) for the shape.
+
+### Telling Claude Code to do it
+
+Claude reads this file, so on your branch it's usually enough to say:
+
+> Push the branch and open the PR with `gh pr create`, following the PR
+> conventions in CONTRIBUTING.md.
+
+If it still gives you a one-liner, spell it out: *"write the full body in a
+heredoc — What this adds / Design decisions / Backend / Testing / Files —
+and use a descriptive title, not the branch name."* A title like
+`Will/map view` is a tell that the PR was opened in the GitHub UI rather
+than with `gh`.
 
 ## After a PR is merged (yours or theirs)
 
@@ -103,6 +145,7 @@ conflict, or ask Will.
 2. Never commit straight to `master`.
 3. Never run a SQL migration solo — coordinate first.
 4. Small, frequent PRs beat one giant branch after two weeks.
+5. Never open a PR with an empty description — five sections, every time.
 
 ## More context
 

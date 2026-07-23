@@ -8,3 +8,6 @@ config.js
 
 # Local dev server helper
 serve.ps1
+
+# Per-machine Claude Code settings (shared config lives in .claude/commands)
+.claude/settings.local.json
