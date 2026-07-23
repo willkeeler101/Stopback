@@ -39,7 +39,6 @@
   --shadow: 0 1px 2px rgba(33, 28, 22, 0.04), 0 4px 12px rgba(33, 28, 22, 0.05);
 
   --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: var(--font-body); /* legacy alias — one family everywhere */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

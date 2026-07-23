@@ -50,7 +50,9 @@ negative branch.
 
 ### Postgres tables (all RLS: owner-only unless noted)
 - `profiles` — 1:1 with auth.users: username, display_name, email,
-  daily_goal, **daily_sales_goal**, baseline_* (imported past stats),
+  daily_goal, **daily_sales_goal**, **weekly_sales_goal** (nullable;
+  migration 7 — NULL = client falls back to daily_sales_goal × 6),
+  baseline_* (imported past stats),
   active_days (date[], streaks), gamify (jsonb), current_streak
   (denormalized for friends), share_stats / share_leads / share_phone
   (privacy toggles), imported_at.
@@ -74,7 +76,8 @@ negative branch.
   leads: [{ id(uuid), name, phone, address, interest, demeanor(legacy),
             notes, callbackAt(ISO|""), soldAt(ISO|""), status, createdAt }],
   activeDays: ["YYYY-MM-DD"],
-  profile: { name, dailyGoal, salesGoal },
+  profile: { name, dailyGoal, salesGoal, weeklySalesGoal|null },
+  // weeklySalesGoal null = unset → weeklySalesGoal() falls back to salesGoal*6
   baseline: { contacts, stopbacks, missed, sales },  // imported past stats
   products: [{ id, name, price, features, createdAt }],
   friends: [],              // managed via RPCs, not this array
@@ -83,10 +86,14 @@ negative branch.
   gamify: {
     badges, lastStreakCelebrated, streakSeen,
     goalHitDate,      // legacy, unused
-    goalCelebrated: { stopbacks: "YYYY-MM-DD", sales: "YYYY-MM-DD" },
-    // ^ date each daily goal last triggered the GOLD celebration; checked in
-    //   runGamification (user actions only) and seeded silently in initGamify
-    //   so page loads / re-renders can never re-celebrate.
+    goalCelebrated: { stopbacks: "YYYY-MM-DD", sales: "YYYY-MM-DD",
+                      salesWeek: "YYYY-MM-DD" },
+    // ^ date each daily goal last triggered the GOLD celebration; salesWeek
+    //   stores the WEEK-START (Monday) the weekly sales goal last went gold.
+    //   Checked in runGamification (user actions only) and seeded silently in
+    //   initGamify so page loads / re-renders can never re-celebrate. The
+    //   salesWeek key is ||-guarded in both (old gamify blobs predate it —
+    //   the jsonb merge replaces the nested object wholesale).
     records: { contactsDay|stopbacksDay|salesDay|salesStreak|loginStreak|
                closeRate|bestWeek: { v, date } },   // permanent personal bests
     recordsCelebrated: { key: "YYYY-MM-DD" }        // one banner/type/day
@@ -103,8 +110,14 @@ Derived totals fold in `baseline` (see `contactsTotal()` etc.). XP/levels are
 derived (`computeXP()`, effort-weighted); badges checked against live data.
 
 ## Tabs (bottom nav, 5 items)
-- **Feed** — "For You": twin goal rings (stop backs + sales), streak-at-risk
-  nudge, **Today's Hit List** (the feature card: due/overdue scheduled
+- **Feed** — segmented header **For You | <active team name>** (TikTok-style
+  `.feed-tabs`; the right tab always mirrors `activeTeamId`, set from the
+  Team manager's "Show on Feed" — multi-team ready). Greeting + streak chip
+  above the tabs; `feedTab` state survives nav away/back.
+  **For You pane**: twin SALES rings (Today vs daily goal, This Week
+  Mon–Sun vs `weeklySalesGoal()` — both green, matching pair; the daily
+  stop-back goal has no ring but still celebrates), streak-at-risk nudge,
+  **Today's Hit List** (the feature card: due/overdue scheduled
   callbacks pinned on top with time shown, then rotating picks — who to
   text/call/stop back; **no selling advice, ever** — the maintainer removed
   the AI coach on purpose), real **achievements** for self + friends
@@ -117,9 +130,14 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   **Weekly Recognition** (live weekly award leaders, gold accents), weekly
   recap. Profile has an **Achievement Showcase** (collectible tiles; record
   tiles gold; keeps p-contacts/p-stopbacks/p-sales/p-days ids).
-  Daily goals go **GOLD** when hit (metallic ring + card sheen + ~2.5s
+  **Team Hub pane** (`renderTeamHub`): identity card (logo/name/members →
+  Team Info modal), the **team leaderboard** (moved here from For You),
+  and honest coming-soon tiles (chat, announcements, shared goals, live
+  map, achievements, stats); no team → empty state into the Team manager.
+  Goals go **GOLD** when hit (metallic ring + card sheen + ~2.5s
   full-screen celebration) and the target rolls +1 forever (5/5 → 5/6 → 6/7)
-  with rotating hype lines — gold never resets that day.
+  with rotating hype lines — gold never resets that day. Overlay priority
+  when goals stack: week > daily sales > stop-back.
 - **Leads** — searchable list; call/text/missed/sale/delete/edit; interest +
   callback badges. **List ⇄ Map toggle**: Leaflet territory map (CARTO/Esri
   basemaps, clustered smart pins colored by status+interest with callback
@@ -131,8 +149,9 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
   optional "When to come back?" datetime).
 - **Stats** — Today/Week/All-time filter, tappable funnel drill-downs with
   7-day CSS trends and plain-English insights.
-- **Profile** — level/XP + badges, name + BOTH daily goals, import past
-  stats, lifetime, Friends + sharing toggles, Products, backup/CSV, sign out.
+- **Profile** — level/XP + badges, name + daily stop-back/sales goals +
+  weekly sales goal (blank = 6× daily), import past stats, lifetime,
+  Friends + sharing toggles, Products, backup/CSV, sign out.
 
 ## Achievements (exact set, computed in `achievementsFor()`)
 - Sales streak: consecutive days with ≥1 sale (from `sale_days`).
@@ -146,7 +165,7 @@ derived (`computeXP()`, effort-weighted); badges checked against live data.
 Keep this aesthetic in ALL future work — it's the brand.
 - Warm cream/papyrus bg (`--paper`), ink text (`--ink`), forest green wins
   (`--green`/`--green-deep`), dark red misses (`--red`), amber accents
-  (`--amber`, sales ring).
+  (`--amber`).
 - **Inter everywhere** — ONE font family; hierarchy comes from the `--fs-*`
   size tokens + weight (800 tight-tracked display, 700 titles, 600 labels,
   400/500 body), never from a typeface change.
