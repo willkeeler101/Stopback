@@ -1226,6 +1226,17 @@ const tdWow       = (r) => {
   const prev = r.stopbacks_prev_week || 0;
   return prev > 0 ? ((r.stopbacks_week || 0) - prev) / prev : null;
 };
+// Sales momentum is the headline momentum (it's what the business runs on),
+// but weekly sales counts are small, so percent alone is noise — a 1 -> 2
+// week is "+100%". tdSalesMove only reports when the counts make the move
+// real: null means "no story this week", not "no data".
+const tdSalesMove = (r) => {
+  const now = r.sales_week || 0, prev = r.sales_prev_week || 0;
+  if (prev >= 2 && now >= prev * 1.4 && now - prev >= 2) return { dir: 1,  now, prev };
+  if (prev === 0 && now >= 3)                            return { dir: 1,  now, prev };
+  if (prev >= 3 && now <= prev * 0.5)                    return { dir: -1, now, prev };
+  return null;
+};
 
 // Pooled rate across a set of reps (total/total), NOT the mean of each rep's
 // rate — averaging rates lets someone with 3 contacts swing the crew number
@@ -1408,23 +1419,27 @@ function tdSignals(rows) {
   const teamSales = tdSum(rows, "sales_month");
 
   // --- Needs a look: one entry per rep, their most serious issue ----------
+  // Sales are the headline metric — a rep's week is "how many sales", and
+  // stop backs only speak when sales can't.
   const attention = [];
   rows.forEach((r) => {
     const cands = [];
-    const wow = tdWow(r);
 
     // Went dark this week after being active — the most urgent thing a lead
-    // can know, so it outranks everything else for this rep.
-    if ((r.stopbacks_week || 0) === 0 && (r.stopbacks_month || 0) > 0)
+    // can know, so it outranks everything else for this rep. "Quiet" means
+    // nothing logged at all: no sales AND no stop backs.
+    if ((r.sales_week || 0) === 0 && (r.stopbacks_week || 0) === 0
+        && ((r.sales_month || 0) > 0 || (r.stopbacks_month || 0) > 0))
       cands.push({ score: 100, icon: "\ud83c\udf19", tone: "warn", label: "Went quiet",
-        detail: `${tdName(r)} hasn't logged a stop back in the last 7 days — ${r.stopbacks_month} in the 30 before that.`,
+        detail: `${tdName(r)} hasn't logged a sale or a stop back in the last 7 days — ${r.sales_month} sale${r.sales_month === 1 ? "" : "s"} in the 30 before that.`,
         metric: "0 this week" });
 
-    // Working, but well down on their own last week.
-    if (wow !== null && wow <= -0.3 && (r.stopbacks_prev_week || 0) >= 3)
-      cands.push({ score: 60 + Math.abs(wow) * 30, icon: "\ud83d\udcc9", tone: "warn", label: "Cooling off",
-        detail: `${tdName(r)} is down to ${r.stopbacks_week} stop backs this week from ${r.stopbacks_prev_week} last week.`,
-        metric: `\u2193 ${Math.round(Math.abs(wow) * 100)}%` });
+    // Selling well below their own last week.
+    const move = tdSalesMove(r);
+    if (move && move.dir < 0)
+      cands.push({ score: 60 + (move.prev - move.now) * 8, icon: "\ud83d\udcc9", tone: "warn", label: "Sales cooling off",
+        detail: `${tdName(r)} is down to ${move.now} sale${move.now === 1 ? "" : "s"} this week from ${move.prev} last week.`,
+        metric: `${move.prev} → ${move.now}` });
 
     // Plenty of doors, few conversations converting into stop backs.
     const door = tdDoorRate(r);
@@ -1446,12 +1461,23 @@ function tdSignals(rows) {
   // --- Worth calling out --------------------------------------------------
   const wins = [];
 
-  const climbers = rows.map((r) => ({ r, c: tdWow(r) })).filter((m) => m.c !== null && m.c >= 0.2);
-  if (climbers.length) {
-    const top = climbers.sort((a, b) => b.c - a.c)[0];
-    wins.push({ score: 70 + top.c * 20, icon: "\ud83d\ude80", tone: "good", label: "Biggest climber",
-      detail: `${tdName(top.r)} went from ${top.r.stopbacks_prev_week} stop backs last week to ${top.r.stopbacks_week} this week.`,
-      metric: `\u2191 ${Math.round(top.c * 100)}%` });
+  // Biggest climber, on SALES. When nobody's sales moved enough to be a
+  // story, fall back to the biggest stop-back climber (relabeled) so a
+  // slow-closing week still recognizes the rep filling the pipeline.
+  const salesClimbers = rows.map((r) => ({ r, m: tdSalesMove(r) })).filter((x) => x.m && x.m.dir > 0);
+  if (salesClimbers.length) {
+    const top = salesClimbers.sort((a, b) => (b.m.now - b.m.prev) - (a.m.now - a.m.prev))[0];
+    wins.push({ score: 75 + (top.m.now - top.m.prev) * 5, icon: "\ud83d\ude80", tone: "good", label: "Biggest climber",
+      detail: `${tdName(top.r)} went from ${top.m.prev} sale${top.m.prev === 1 ? "" : "s"} last week to ${top.m.now} this week.`,
+      metric: `${top.m.prev} → ${top.m.now} sales` });
+  } else {
+    const climbers = rows.map((r) => ({ r, c: tdWow(r) })).filter((m) => m.c !== null && m.c >= 0.2);
+    if (climbers.length) {
+      const top = climbers.sort((a, b) => b.c - a.c)[0];
+      wins.push({ score: 70 + top.c * 20, icon: "\ud83d\ude80", tone: "good", label: "Filling the pipeline",
+        detail: `${tdName(top.r)} went from ${top.r.stopbacks_prev_week} stop backs last week to ${top.r.stopbacks_week} this week — sales usually follow.`,
+        metric: `\u2191 ${Math.round(top.c * 100)}%` });
+    }
   }
 
   const rated = rows.filter((r) => tdCloseRate(r) !== null);
@@ -1724,12 +1750,24 @@ function tdYouHtml(rows) {
 
   // --- The plain-language rows: momentum, and where you're strongest.
   const items = [];
-  const wow = tdWow(me);
-  if (wow !== null && Math.abs(wow) >= 0.1) {
-    const p = Math.round(Math.abs(wow) * 100);
-    items.push({ icon: wow > 0 ? "\ud83d\udcc8" : "\ud83d\udcc9", tone: wow > 0 ? "good" : "warn",
-      label: "Your momentum", metric: `${wow > 0 ? "\u2191" : "\u2193"} ${p}%`,
-      detail: `${me.stopbacks_week} stop backs this week against ${me.stopbacks_prev_week} last week.` });
+  // Momentum reads on SALES first — that's the number a week is judged by.
+  // Stop backs only stand in when this week's and last week's sales are both
+  // too small to say anything.
+  const myMove = tdSalesMove(me);
+  if (myMove) {
+    items.push({ icon: myMove.dir > 0 ? "\ud83d\udcc8" : "\ud83d\udcc9", tone: myMove.dir > 0 ? "good" : "warn",
+      label: "Your momentum", metric: `${myMove.prev} → ${myMove.now} sales`,
+      detail: myMove.dir > 0
+        ? `${myMove.now} sale${myMove.now === 1 ? "" : "s"} this week against ${myMove.prev} last week — that's the direction.`
+        : `${myMove.now} sale${myMove.now === 1 ? "" : "s"} this week against ${myMove.prev} last week.` });
+  } else if ((me.sales_week || 0) < 2 && (me.sales_prev_week || 0) < 2) {
+    const wow = tdWow(me);
+    if (wow !== null && Math.abs(wow) >= 0.1) {
+      const p = Math.round(Math.abs(wow) * 100);
+      items.push({ icon: wow > 0 ? "\ud83d\udcc8" : "\ud83d\udcc9", tone: wow > 0 ? "good" : "warn",
+        label: "Pipeline momentum", metric: `${wow > 0 ? "\u2191" : "\u2193"} ${p}%`,
+        detail: `${me.stopbacks_week} stop backs this week against ${me.stopbacks_prev_week} last week.` });
+    }
   }
 
   // Your strongest and weakest funnel stage vs the crew — the one thing most
@@ -1777,6 +1815,142 @@ function tdYouHtml(rows) {
       ]));
 }
 
+// ---- Heat map tab -------------------------------------------------------
+// Territory heat: where doors open and where sales land, drawn as ~275 m
+// grid cells over the same basemap the Leads map uses. Deliberately never
+// shows an individual house — team data arrives from get_team_heat()
+// already binned server-side (migration 7), and the pre-migration fallback
+// bins the viewer's own leads client-side with the same grid.
+const TD_HEAT_BIN = 0.0025;                 // must match migration 7
+let tdHeatKind = "contacts";                // contacts | sales
+let tdHeatCache = { teamId: null, bins: null, scope: "self" };
+let tdHeatMap = null;                       // Leaflet instance for the tab
+let tdHeatLayer = null;
+
+// Client-side fallback: bin MY leads on the same grid the server uses.
+function tdSelfHeatBins() {
+  const cutoff = Date.now() - 90 * 86400000;
+  const cells = new Map();
+  (state.leads || []).forEach((l) => {
+    if (l.lat == null || l.lng == null) return;
+    if (new Date(l.createdAt).getTime() < cutoff) return;
+    const la = Math.floor(l.lat / TD_HEAT_BIN) * TD_HEAT_BIN + TD_HEAT_BIN / 2;
+    const ln = Math.floor(l.lng / TD_HEAT_BIN) * TD_HEAT_BIN + TD_HEAT_BIN / 2;
+    const k = la + "," + ln;
+    const c = cells.get(k) || { lat_bin: la, lng_bin: ln, contacts: 0, sales: 0 };
+    c.contacts++;
+    if (l.status === "sale") c.sales++;
+    cells.set(k, c);
+  });
+  return [...cells.values()];
+}
+
+async function tdLoadHeat() {
+  if (tdHeatCache.teamId === activeTeamId && tdHeatCache.bins) return tdHeatCache;
+  let bins = null, scope = "team";
+  try { bins = await dbGetTeamHeat(activeTeamId); } catch (_) { bins = null; }
+  if (bins === null) { bins = tdSelfHeatBins(); scope = "self"; }   // migration 7 not run yet
+  tdHeatCache = { teamId: activeTeamId, bins, scope };
+  return tdHeatCache;
+}
+
+function tdHeatHtml() {
+  return `<section class="td-card td-heatcard">
+      <h3 class="td-card-title">Territory heat</h3>
+      <p class="td-note" id="td-heat-note">Where the crew's tagged doors cluster, last 90 days. No individual houses — each cell is a ~275 m block.</p>
+      <div class="td-heat-toggle" role="tablist" aria-label="Heat metric">
+        <button type="button" class="chip td-heat-chip is-on" data-heatkind="contacts" aria-pressed="true">Contacts</button>
+        <button type="button" class="chip td-heat-chip" data-heatkind="sales" aria-pressed="false">Sales</button>
+      </div>
+      <div id="td-heatmap" class="td-heatmap"></div>
+      <div class="td-heat-legend" id="td-heat-legend" hidden>
+        <span>fewer</span><span class="td-heat-grad" id="td-heat-grad"></span><span>more</span>
+      </div>
+      <p class="td-foot" id="td-heat-foot"></p>
+    </section>`;
+}
+
+// (Re)draw just the overlay for the active metric on the existing map.
+function tdDrawHeat(bins) {
+  if (!tdHeatMap) return;
+  if (tdHeatLayer) { tdHeatMap.removeLayer(tdHeatLayer); tdHeatLayer = null; }
+  const val = (b) => (tdHeatKind === "sales" ? b.sales : b.contacts);
+  const active = bins.filter((b) => val(b) > 0);
+  const legend = document.getElementById("td-heat-legend");
+  const foot = document.getElementById("td-heat-foot");
+  if (!active.length) {
+    if (legend) legend.hidden = true;
+    if (foot) foot.textContent = tdHeatKind === "sales"
+      ? "No tagged sales in the last 90 days yet."
+      : "No tagged doors in the last 90 days yet.";
+    return;
+  }
+  const max = Math.max(...active.map(val));
+  // Sales heat is amber (the app's sales color), contacts green. The two are
+  // never on screen together — the pressed chip names the metric.
+  const color = tdHeatKind === "sales" ? "#b9791f" : "#227d47";
+  const h = TD_HEAT_BIN / 2;
+  tdHeatLayer = L.layerGroup(active.map((b) => {
+    const v = val(b);
+    // sqrt spreads low counts apart — with a linear scale one hot block
+    // makes every other cell near-invisible.
+    const t = Math.sqrt(v / max);
+    return L.rectangle(
+      [[b.lat_bin - h, b.lng_bin - h], [b.lat_bin + h, b.lng_bin + h]],
+      { stroke: false, fillColor: color, fillOpacity: 0.15 + 0.55 * t, interactive: true }
+    ).bindTooltip(`${v} ${tdHeatKind === "sales" ? "sale" : "contact"}${v === 1 ? "" : "s"}`, { direction: "top" });
+  })).addTo(tdHeatMap);
+  if (legend) {
+    legend.hidden = false;
+    const grad = document.getElementById("td-heat-grad");
+    if (grad) grad.style.background = `linear-gradient(to right, ${color}26, ${color}b3)`;
+  }
+  const total = active.reduce((s, b) => s + val(b), 0);
+  if (foot) foot.textContent = `${total} tagged ${tdHeatKind === "sales" ? "sale" : "contact"}${total === 1 ? "" : "s"} across ${active.length} blocks. Hottest block: ${max}.`;
+}
+
+async function tdMountHeat() {
+  const el = document.getElementById("td-heatmap");
+  if (!el) return;
+  if (typeof L === "undefined") {
+    el.outerHTML = `<p class="empty-hint">Map failed to load (no connection?)</p>`;
+    return;
+  }
+  const { bins, scope } = await tdLoadHeat();
+  const note = document.getElementById("td-heat-note");
+  if (note && scope === "self")
+    note.textContent = "Your tagged doors, last 90 days — crew-wide heat unlocks once migration 7 runs on the shared database. No individual houses; each cell is a ~275 m block.";
+
+  // The tab re-render may have destroyed a previous map's container.
+  if (tdHeatMap) { tdHeatMap.remove(); tdHeatMap = null; tdHeatLayer = null; }
+  if (!bins.length) {
+    el.outerHTML = `<p class="empty-hint">No GPS-tagged doors yet. Tag houses with \ud83d\udccd when logging a stop back and the heat map fills in.</p>`;
+    const foot = document.getElementById("td-heat-foot");
+    if (foot) foot.textContent = "";
+    return;
+  }
+  tdHeatMap = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 17 });
+  const s = MAP_STYLES.standard;
+  L.tileLayer(s.url, { maxZoom: 17, attribution: s.attribution, className: s.className }).addTo(tdHeatMap);
+  const pts = bins.map((b) => [b.lat_bin, b.lng_bin]);
+  tdHeatMap.fitBounds(L.latLngBounds(pts).pad(0.25));
+  tdDrawHeat(bins);
+  // The container was hidden a tick ago; Leaflet needs a size poke.
+  setTimeout(() => { if (tdHeatMap) tdHeatMap.invalidateSize(); }, 0);
+
+  document.querySelectorAll(".td-heat-chip").forEach((chip) => {
+    chip.onclick = () => {
+      tdHeatKind = chip.dataset.heatkind;
+      document.querySelectorAll(".td-heat-chip").forEach((c) => {
+        const on = c === chip;
+        c.classList.toggle("is-on", on);
+        c.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      tdDrawHeat(bins);
+    };
+  });
+}
+
 function renderTeamDash() {
   const rows = teamOverview || [];
   const body = document.getElementById("tin-body");
@@ -1787,11 +1961,18 @@ function renderTeamDash() {
     return;
   }
 
+  // Leaving the heat tab (or re-rendering it) destroys the Leaflet
+  // container — drop the instance so it isn't left pointing at dead DOM.
+  if (tdHeatMap) { tdHeatMap.remove(); tdHeatMap = null; tdHeatLayer = null; }
+
   body.innerHTML =
     tdTab === "crew" ? tdCrewHtml(rows) :
     tdTab === "timing" ? tdTimingHtml(rows) :
     tdTab === "you" ? tdYouHtml(rows) :
+    tdTab === "heat" ? tdHeatHtml() :
     tdOverviewHtml(rows);
+
+  if (tdTab === "heat") tdMountHeat();   // async: fetch bins, then draw
 
   // Sortable scorecard headers repaint just this tab.
   body.querySelectorAll(".td-sc-sort").forEach((btn) => {
