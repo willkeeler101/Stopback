@@ -10,10 +10,10 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="icon" href="icon-1024.png" />
 
-  <!-- Signature display font (Fraunces) + readable body font (Inter) -->
+  <!-- One family everywhere: Inter. Hierarchy comes from size + weight. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800;9..144,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <!-- Leaflet (map view of leads) — free OpenStreetMap tiles, no API key -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -78,20 +78,26 @@
     <!-- ===================== FEED (FOR YOU) VIEW ===================== -->
     <section class="view" id="view-feed">
       <div class="feed-head">
-        <div>
-          <h1 class="view-title" id="feed-greeting">Welcome back</h1>
-          <p class="view-sub">Your For You page</p>
-        </div>
+        <h1 class="feed-greeting" id="feed-greeting">Welcome back</h1>
         <div class="streak-chip" title="Day streak">
           <span class="streak-flame">🔥</span><strong id="streak-num">0</strong>
         </div>
       </div>
-      <!-- The whole scrollable feed is built here by app.js.
-           Skeletons show briefly on load instead of a blank flash. -->
-      <div class="feed-stream" id="feed-stream">
-        <div class="skeleton-card"></div>
-        <div class="skeleton-card"></div>
-        <div class="skeleton-card"></div>
+      <!-- For You | <active team> — the right tab always mirrors activeTeamId -->
+      <div class="feed-tabs" role="tablist" aria-label="Feed">
+        <button class="ft-btn active" type="button" data-tab="foryou" role="tab" aria-selected="true">For You</button>
+        <button class="ft-btn" type="button" data-tab="team" role="tab" aria-selected="false" id="ft-team">Team</button>
+      </div>
+      <div class="feed-panes">
+        <!-- The whole scrollable feed is built here by app.js.
+             Skeletons show briefly on load instead of a blank flash. -->
+        <div class="feed-stream feed-pane" id="feed-stream">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+        <!-- Team Hub — built lazily by renderTeamHub() -->
+        <div class="feed-pane" id="team-hub" hidden></div>
       </div>
     </section>
 
@@ -329,6 +335,10 @@
         <label>Daily sales goal
           <input type="number" id="p-sales-goal" min="1" placeholder="2" />
         </label>
+        <label>Weekly sales goal
+          <input type="number" id="p-week-goal" min="1" placeholder="12" />
+        </label>
+        <p class="muted small">Blank = 6× your daily sales goal.</p>
       </div>
 
       <div class="card form">

@@ -12,7 +12,7 @@ const DEFAULT_STATE = {
   contactsTodayCount: 0,   // today's "+1" taps (loaded from log_events)
   leads: [],               // full stop-back records
   activeDays: [],          // "YYYY-MM-DD" strings — used for streaks
-  profile: { name: "", dailyGoal: 5, salesGoal: 2 },
+  profile: { name: "", dailyGoal: 5, salesGoal: 2, weeklySalesGoal: null },
   // Historical totals from before using the app — added on top of live data.
   baseline: { contacts: 0, stopbacks: 0, missed: 0, sales: 0 },
   products: [],            // things you sell (for the brochure)
@@ -22,7 +22,9 @@ const DEFAULT_STATE = {
   gamify: {
     badges: {},
     goalHitDate: "", // legacy (pre-gold); superseded by goalCelebrated
-    goalCelebrated: { stopbacks: "", sales: "" }, // date each goal last went gold
+    // stopbacks/sales: date each daily goal last went gold.
+    // salesWeek: the WEEK-START date ("Monday") the weekly goal last went gold.
+    goalCelebrated: { stopbacks: "", sales: "", salesWeek: "" },
     lastStreakCelebrated: 0,
     streakSeen: 0,
     records: {},           // personal bests: { key: { v, date } } — permanent
@@ -142,6 +144,29 @@ function salesToday() {
   return state.leads.filter(
     (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === t
   ).length;
+}
+
+// Monday of the current week as a local date string (same Mon-Sun math as
+// seedRecords' best-week backfill — keep the two in agreement).
+function weekStartStr(d = new Date()) {
+  const m = new Date(d);
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+  return localDateStr(m);
+}
+
+// Sales closed this calendar week (Mon-Sun). Same soldAt||createdAt
+// convention as salesToday so the two rings can never disagree.
+function salesThisWeek() {
+  const start = weekStartStr();
+  return state.leads.filter(
+    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) >= start
+  ).length;
+}
+
+// Weekly sales goal: explicit if the rep set one, else 6 workdays × daily goal.
+// (0/null both mean "unset" — mirrors how dailyGoal <= 0 disables its ring.)
+function weeklySalesGoal() {
+  return state.profile.weeklySalesGoal || (state.profile.salesGoal || 0) * 6;
 }
 
 // =====================================================================
@@ -363,10 +388,15 @@ function initGamify() {
   // Seed the gold-celebration stamps for goals already met, so a page load
   // or re-render can never re-fire a celebration.
   state.gamify.goalCelebrated = state.gamify.goalCelebrated || { stopbacks: "", sales: "" };
+  // Older stored gamify blobs predate the weekly key (the jsonb merge replaces
+  // the nested object wholesale) — guard it in, same pattern as above.
+  state.gamify.goalCelebrated.salesWeek = state.gamify.goalCelebrated.salesWeek || "";
   const sbGoal = state.profile.dailyGoal || 0;
   const sGoal = state.profile.salesGoal || 0;
+  const wkGoal = weeklySalesGoal();
   if (sbGoal > 0 && stopbacksToday() >= sbGoal) state.gamify.goalCelebrated.stopbacks = today;
   if (sGoal > 0 && salesToday() >= sGoal) state.gamify.goalCelebrated.sales = today;
+  if (wkGoal > 0 && salesThisWeek() >= wkGoal) state.gamify.goalCelebrated.salesWeek = weekStartStr();
   // Seed records from the leads on hand (v_daily_stats backfill runs async
   // in startApp). Silent — load can never trigger a record banner.
   seedRecords(null);
@@ -385,14 +415,21 @@ function runGamification(opts = {}) {
   // Daily goals → premium gold celebration, once per goal per day.
   state.gamify.goalCelebrated = state.gamify.goalCelebrated || { stopbacks: "", sales: "" };
   const gc = state.gamify.goalCelebrated;
+  gc.salesWeek = gc.salesWeek || ""; // pre-weekly-key blobs (see initGamify)
   const sbGoal = state.profile.dailyGoal || 0;
   const sGoal = state.profile.salesGoal || 0;
+  const wkGoal = weeklySalesGoal();
+  const wk = weekStartStr();
   const sbHit = sbGoal > 0 && stopbacksToday() >= sbGoal && gc.stopbacks !== today;
   const sHit = sGoal > 0 && salesToday() >= sGoal && gc.sales !== today;
+  const wHit = wkGoal > 0 && salesThisWeek() >= wkGoal && gc.salesWeek !== wk;
   if (sbHit) gc.stopbacks = today;
   if (sHit) gc.sales = today;
+  if (wHit) gc.salesWeek = wk;
+  // One overlay max — the biggest win headlines (week > daily sales > SB).
   let gold = false;
-  if (sbHit && sHit) { goldCelebration("BOTH GOALS DOWN"); gold = true; }
+  if (wHit) { goldCelebration(sHit ? "WEEK + TODAY DOWN" : "WEEK GOAL CRUSHED"); gold = true; }
+  else if (sbHit && sHit) { goldCelebration("BOTH GOALS DOWN"); gold = true; }
   else if (sbHit) { goldCelebration("STOP-BACK GOAL HIT"); gold = true; }
   else if (sHit) { goldCelebration("SALES GOAL HIT"); gold = true; }
 
@@ -794,7 +831,7 @@ function hitListPost() {
         <span class="avatar avatar-ai big">🎯</span>
         <div>
           <span class="post-author hl-heading">Today's Hit List</span>
-          <span class="post-tag">Who to text, call, or stop back today</span>
+          <span class="post-tag">Text, call, or knock</span>
         </div>
       </div>
       <div class="hl-rows"></div>
@@ -895,45 +932,44 @@ function ringHtml(value, goal, cls, label, animate) {
     </div>`;
 }
 
-// Twin progress rings: today's stop backs AND sales vs your daily goals.
+// Twin sales rings: today vs your daily goal, this week (Mon-Sun) vs your
+// weekly goal. Matching pair, Apple-Fitness style. The daily stop-back goal
+// lives on in Profile + gold celebrations — it just has no ring here.
 function goalPost(animate) {
-  const sbGoal = state.profile.dailyGoal || 0;
   const sGoal = state.profile.salesGoal || 0;
-  if (sbGoal <= 0 && sGoal <= 0) return null;
+  const wGoal = weeklySalesGoal();
+  if (sGoal <= 0) return null; // weekly falls back off sGoal — both die together
 
-  const today = localDateStr();
-  const todayLeads = state.leads.filter((l) => localDateStr(new Date(l.createdAt)) === today);
-  const sb = todayLeads.length;
-  const sales = state.leads.filter(
-    (l) => l.status === "sale" && localDateStr(new Date(l.soldAt || l.createdAt)) === today
-  ).length;
+  const sales = salesToday();
+  const week = salesThisWeek();
 
-  const rings = [];
-  if (sbGoal > 0) rings.push(ringHtml(sb, sbGoal, "", "Stop backs", animate));
-  if (sGoal > 0) rings.push(ringHtml(sales, sGoal, "sales", "Sales", animate));
+  const rings = [
+    ringHtml(sales, sGoal, "", "Today", animate),
+    ringHtml(week, wGoal, "", "This Week", animate),
+  ];
 
-  const sbDone = sbGoal > 0 && sb >= sbGoal;
-  const sDone = sGoal > 0 && sales >= sGoal;
-  const anyDone = sbDone || sDone;
-  const allDone = (sbGoal <= 0 || sbDone) && (sGoal <= 0 || sDone);
+  const sDone = sales >= sGoal;
+  const wDone = wGoal > 0 && week >= wGoal;
+  const anyDone = sDone || wDone;
+  const allDone = sDone && wDone;
 
   // Once a goal is achieved the message flips to hype and never resets today.
   const remaining = [
-    sbGoal > 0 && !sbDone ? `${sbGoal - sb} stop back${sbGoal - sb > 1 ? "s" : ""}` : "",
-    sGoal > 0 && !sDone ? `${sGoal - sales} sale${sGoal - sales > 1 ? "s" : ""}` : "",
-  ].filter(Boolean).join(" and ");
-  const hype = `<strong class="hype">${hypeLine("goal" + sb + "-" + sales + localDateStr())}</strong>`;
+    !sDone ? `${sGoal - sales} sale${sGoal - sales > 1 ? "s" : ""} today` : "",
+    !wDone && wGoal > 0 ? `${wGoal - week} this week` : "",
+  ].filter(Boolean).join(" · ");
+  const hype = `<strong class="hype">${hypeLine("goal" + sales + "-" + week + localDateStr())}</strong>`;
   const msg = allDone
     ? hype
     : anyDone
-    ? `${hype} ${remaining} to go today.`
-    : `${remaining} to go today.`;
+    ? `${hype} ${remaining}.`
+    : `${remaining}.`;
 
   const node = el(`
     <article class="post post-goal${anyDone ? " gold" : ""}">
       <div class="goal-cols">${rings.join("")}</div>
       <div class="goal-text">
-        <span class="post-tag">Today's goals</span>
+        <span class="post-tag">Sales goals</span>
         <p class="post-body">${msg}</p>
       </div>
     </article>`);
@@ -1173,7 +1209,7 @@ function teamLeaderboardPost() {
       <div class="post-head team-post-head">
         ${teamLogoHtml(team, "avatar avatar-team")}
         <button type="button" class="team-title-btn" aria-label="Open ${escapeHtml(team.name)} team info">
-          <span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking · tap for info</span>
+          <span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking</span>
         </button>
         <button type="button" class="team-insights-btn">📊 Insights</button>
       </div>
@@ -2401,6 +2437,28 @@ function interleave(...lists) {
 // so later re-renders (after logging, liking, etc.) don't re-jump.
 let feedAnimated = false;
 
+// Which top feed tab is showing: "foryou" | "team". Survives nav away/back
+// (switchView only toggles .view sections — this state lives here).
+let feedTab = "foryou";
+
+function setFeedTab(tab) {
+  feedTab = tab;
+  document.querySelectorAll(".ft-btn").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  const stream = document.getElementById("feed-stream");
+  const hub = document.getElementById("team-hub");
+  stream.hidden = tab !== "foryou";
+  hub.hidden = tab !== "team";
+  const shown = tab === "team" ? hub : stream;
+  shown.classList.remove("pane-in");
+  void shown.offsetWidth; // restart the pane transition
+  shown.classList.add("pane-in");
+  if (tab === "team") renderTeamHub(); // lazy — built on first open, kept fresh after
+}
+
 // Live stats for you + accepted friends — fills the feed's achievements.
 let friendsOverview = [];
 async function refreshFriendsOverview() {
@@ -2413,6 +2471,67 @@ async function refreshFriendsOverview() {
   }
 }
 
+// Team Hub pane (right feed tab): identity card, the team leaderboard
+// (relocated from the For You stream), and honest coming-soon tiles.
+// Rebuilt on every open/refresh — cheap, and keeps it in sync with
+// refreshTeams()/setActiveTeam() which both call renderFeed().
+function renderTeamHub() {
+  const hub = document.getElementById("team-hub");
+  if (!hub) return;
+  hub.innerHTML = "";
+  const team = activeTeam();
+
+  if (!team) {
+    const empty = el(`
+      <article class="post hub-empty">
+        <span class="hub-empty-icon">🏢</span>
+        <span class="empty-title">No team yet</span>
+        <p class="post-body">Rankings, shared goals, and team wins live here.</p>
+        <button type="button" class="primary hub-join-btn">Join or create a team</button>
+      </article>`);
+    empty.querySelector(".hub-join-btn").onclick = () => switchView("teams");
+    hub.appendChild(empty);
+    return;
+  }
+
+  // Identity card — logo, name, members. Tap anywhere for full team info.
+  const members = team.member_count || 1;
+  const head = el(`
+    <article class="post hub-head">
+      ${teamLogoHtml(team, "avatar avatar-team hub-logo")}
+      <div class="hub-head-text">
+        <span class="hub-team-name">${escapeHtml(team.name)}</span>
+        <span class="post-tag">${members} member${members === 1 ? "" : "s"} · tap for info</span>
+      </div>
+    </article>`);
+  head.addEventListener("click", (e) => {
+    if (e.target.closest("button, a, input")) return;
+    openTeamInfo(team.id);
+  });
+  hub.appendChild(head);
+
+  // The team board — same self-contained builder the feed used to render.
+  const board = teamLeaderboardPost();
+  if (board) hub.appendChild(board);
+
+  // What's coming — muted, honest placeholders (no fake interactivity).
+  hub.appendChild(el(`
+    <article class="post hub-soon">
+      <div class="hub-soon-head">
+        <span class="post-author">More coming to your Team Hub</span>
+        <span class="soon-pill">Coming soon</span>
+      </div>
+      <div class="hub-grid">
+        <div class="hub-tile"><span class="hub-tile-icon">💬</span><span class="hub-tile-name">Team chat</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">📣</span><span class="hub-tile-name">Announcements</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">🎯</span><span class="hub-tile-name">Shared goals</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">🗺️</span><span class="hub-tile-name">Live territory map</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">🏆</span><span class="hub-tile-name">Team achievements</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">📊</span><span class="hub-tile-name">Team stats</span></div>
+      </div>
+    </article>`));
+}
+
 function renderFeed() {
   const name = state.profile.name ? state.profile.name.split(" ")[0] : "there";
   const hour = new Date().getHours();
@@ -2420,6 +2539,11 @@ function renderFeed() {
   document.getElementById("feed-greeting").textContent = `${part}, ${name} 👋`;
   document.getElementById("streak-num").textContent = currentStreak();
   maybeAnimateStreak();
+
+  // The right tab always mirrors the active team (set via Team manager).
+  const team = activeTeam();
+  document.getElementById("ft-team").textContent = team ? team.name : "Team";
+  if (feedTab === "team") renderTeamHub();
 
   const animate = !feedAnimated;
   const stream = document.getElementById("feed-stream");
@@ -2440,7 +2564,6 @@ function renderFeed() {
     goalPost(animate),
     pacePost(),
     hitListPost(),
-    teamLeaderboardPost(),
     ...interleave(mine, theirs),
     insightPost(),
     leaderboardPost(),
@@ -3098,6 +3221,8 @@ function renderProfile() {
   document.getElementById("p-name").value = state.profile.name;
   document.getElementById("p-goal").value = state.profile.dailyGoal;
   document.getElementById("p-sales-goal").value = state.profile.salesGoal;
+  // Empty shows the placeholder → the 6× daily fallback is in effect.
+  document.getElementById("p-week-goal").value = state.profile.weeklySalesGoal || "";
   buildShowcase();
 
   // Level + XP
@@ -3618,6 +3743,11 @@ function wireEvents() {
   document.getElementById("tally-minus").addEventListener("click", () => bumpTally(-1));
   document.getElementById("search").addEventListener("input", renderLeads);
 
+  // Feed: For You ⇄ Team tab switch.
+  document.querySelectorAll(".ft-btn").forEach((b) =>
+    b.addEventListener("click", () => setFeedTab(b.dataset.tab))
+  );
+
   // Leads list ⇄ map toggle + one-tap GPS capture on the Add Stop Back form.
   document.querySelectorAll(".lt-btn").forEach((b) =>
     b.addEventListener("click", () => setLeadsMode(b.dataset.mode))
@@ -3677,6 +3807,12 @@ function wireEvents() {
     state.profile.salesGoal = parseInt(e.target.value, 10) || 0;
     save();
     saveProfileDebounced({ daily_sales_goal: state.profile.salesGoal });
+  });
+  document.getElementById("p-week-goal").addEventListener("input", (e) => {
+    // Blank → null → the 6× daily fallback (weeklySalesGoal()).
+    state.profile.weeklySalesGoal = parseInt(e.target.value, 10) || null;
+    save();
+    saveProfileDebounced({ weekly_sales_goal: state.profile.weeklySalesGoal });
   });
 
   // Import-past-stats inputs. We update totals everywhere but DON'T re-render

@@ -17,6 +17,23 @@ A door-to-door sales tracker. ~1 hour/day, ~2 weeks. Check things off as you go.
 9. ~~**CSV/Excel export** of leads~~ ✅ DONE (Profile → Backup → Export leads to CSV)
 10. **Leaderboard done right** (cloud) — tiered groups + personal-best framing, not one global rank
 
+## ✅ Feed redesign — premium production pass (DONE, July 2026)
+- [x] One-font typography system (Inter everywhere; Fraunces retired; `--fs-*` token scale)
+- [x] Segmented feed header: **For You | \<active team\>** (TikTok-style, multi-team ready)
+- [x] Twin SALES rings: Today vs daily goal + This Week (Mon–Sun) vs weekly goal
+      (`profiles.weekly_sales_goal`, migration 8; blank = 6× daily fallback)
+- [x] Weekly gold celebration (once per week, reload-safe, seeded silently)
+- [x] Team Hub pane: identity card, team leaderboard (moved out of For You), coming-soon tiles
+- [x] Density/polish pass: tighter rhythm, 40px+ tap targets, less filler copy
+
+### Team Hub backlog (the coming-soon tiles, in rough order)
+- [ ] Team chat
+- [ ] Team announcements (owner posts, members read)
+- [ ] Shared team goals
+- [ ] Live territory map (friend layer — see MAP-ARCHITECTURE.md Phase C)
+- [ ] Team achievements
+- [ ] Team stats
+
 ## ✅ Phase 3.5 — "For You" feed + Friends (DONE)
 - [x] Scrollable For You feed (Instagram-style stream of cards)
 - [x] AI Coach cards (heuristic): pace-to-goal, demeanor approach tips, money pattern, cold leads, daily objection drill
