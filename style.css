@@ -34,6 +34,21 @@
 
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* ===== Chart tokens (Team Intelligence) =====
+     Validated against the --paper-2 card surface, not eyeballed. The brand
+     green/amber pair sits in the CVD floor band (ΔE 6.6 deutan), so any
+     two-series mark MUST also be direct-labeled — never color alone.
+     --c-seq-* is a single-hue sequential ramp, light -> dark = deeper in the
+     funnel; the lightest step is low-contrast on cream by nature, which is
+     why every bar carries a visible value label. */
+  --c-seq-1: #5e9273;   /* contacts   — widest, lightest */
+  --c-seq-2: #347a4f;   /* stop backs */
+  --c-seq-3: #1b6b3e;   /* sales      — narrowest, deepest */
+  --c-accent: #227d47;  /* the one mark that matters (emphasis form) */
+  --c-alt:    #9c5c0a;  /* second series, always direct-labeled */
+  --c-muted:  #c3b391;  /* de-emphasised marks / tracks */
+  --c-miss:   var(--red);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1246,6 +1261,140 @@ button.ghost.full { width: 100%; margin-top: 0.6rem; }
 }
 .ti-text { display: flex; flex-direction: column; gap: 1px; }
 .ti-text strong { font-size: var(--fs-sub); color: var(--ink); }
+/* Signal severity: tone is carried by the icon + label too, never color alone. */
+.ti-icon.tone-good { background: #dcebe0; }
+.ti-icon.tone-warn { background: #f0e2c8; }
+
+/* ===== Team Intelligence dashboard ===== */
+.modal-dash {
+  max-width: 560px; width: 100%;
+  padding: 1rem 0.9rem 0.9rem;
+  position: relative;           /* tooltip anchors to this box */
+  display: flex; flex-direction: column;
+  max-height: 92vh;
+}
+.td-head { display: flex; align-items: center; gap: var(--sp-3); padding-right: 2rem; }
+.td-headtext { display: flex; flex-direction: column; min-width: 0; }
+.td-headtext .post-author { font-family: var(--font-display); font-size: 1.15rem; }
+
+/* Tab strip — horizontally scrollable on narrow phones. */
+.td-tabs {
+  display: flex; gap: var(--sp-1); margin: var(--sp-3) 0 var(--sp-2);
+  overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+}
+.td-tabs::-webkit-scrollbar { display: none; }
+.td-tab {
+  flex: none; border: 1px solid var(--line); background: var(--paper-2);
+  color: var(--ink-soft); font: inherit; font-size: var(--fs-caption); font-weight: 600;
+  padding: 0.5rem 0.85rem; border-radius: 999px; cursor: pointer; min-height: 40px;
+}
+.td-tab.is-on { background: var(--green); border-color: var(--green); color: #fff; }
+
+.td-body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px; }
+.td-card {
+  background: var(--paper-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 0.9rem; margin-bottom: var(--sp-3);
+}
+.td-card-title { font-size: var(--fs-h2); margin-bottom: 2px; }
+.td-note { font-size: var(--fs-caption); color: var(--ink-soft); margin-bottom: var(--sp-3); }
+.td-foot { font-size: var(--fs-caption); color: var(--ink-soft); margin-top: var(--sp-3); }
+.td-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+.td-dot-miss { background: var(--c-miss); }
+.td-cap { caption-side: top; text-align: left; font-size: var(--fs-caption); color: var(--ink-soft); padding-bottom: var(--sp-2); }
+
+/* KPI row — stat tiles, not a bar chart of four numbers. */
+.td-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.td-kpi {
+  background: var(--paper-2); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 0.7rem 0.8rem;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.td-kpi-lab { font-size: var(--fs-caption); color: var(--ink-soft); }
+.td-kpi-val { font-family: var(--font-display); font-size: 1.6rem; line-height: 1.15; color: var(--ink); }
+.td-kpi.is-hero .td-kpi-val { font-size: 2.1rem; color: var(--green-deep); }
+.td-delta { font-size: var(--fs-caption); font-weight: 600; }
+.td-delta.is-up { color: var(--green-deep); }
+.td-delta.is-down { color: var(--red); }
+.td-delta.is-flat { color: var(--ink-soft); font-weight: 400; }
+
+/* Funnel — horizontal bars on one shared scale. */
+.td-funnel { display: flex; flex-direction: column; }
+.td-fn-label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: var(--fs-caption); color: var(--ink-soft); margin-bottom: 3px;
+}
+.td-fn-label b { font-family: var(--font-display); font-size: var(--fs-body); color: var(--ink); }
+.td-fn-track { background: var(--paper-3); border-radius: 4px; height: 22px; overflow: hidden; }
+.td-fn-bar { height: 100%; border-radius: 0 4px 4px 0; transition: width 0.5s ease; }
+.td-fill-1 { background: var(--c-seq-1); }
+.td-fill-2 { background: var(--c-seq-2); }
+.td-fill-3 { background: var(--c-seq-3); }
+.td-fn-conv {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-caption); color: var(--ink-soft);
+  padding: var(--sp-2) 0 var(--sp-2) 2px;
+}
+.td-fn-arrow { color: var(--c-seq-2); font-weight: 700; }
+
+/* Closing windows — emphasis: peak block accented, the rest recede. */
+.td-hours { display: flex; align-items: flex-end; gap: 3px; height: 130px; }
+.td-hr-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; }
+.td-hr-track { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.td-hr-bar {
+  width: 100%; background: var(--c-muted); border-radius: 4px 4px 0 0;
+  min-height: 0; transition: height 0.5s ease;
+}
+.td-hr-bar.is-peak { background: var(--c-accent); }
+.td-hr-lab { font-size: 0.62rem; color: var(--ink-soft); height: 12px; }
+
+/* 30-day trend — one series, so no legend; the title names it. */
+.td-trend { width: 100%; height: auto; display: block; overflow: visible; }
+.td-tr-area { fill: var(--c-accent); opacity: 0.14; }
+.td-tr-line { fill: none; stroke: var(--c-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.td-tr-dot { fill: var(--c-accent); opacity: 0.55; }
+.td-tr-dot.is-peak { opacity: 1; stroke: var(--paper-2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.td-axis { display: flex; justify-content: space-between; font-size: var(--fs-caption); color: var(--ink-soft); margin-top: 2px; }
+
+/* Rep scorecard — a table, because 8+ reps is past what color can carry. */
+.td-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.td-sc { width: 100%; border-collapse: collapse; font-size: var(--fs-sub); table-layout: fixed; }
+.td-sc th, .td-sc td { text-align: right; padding: 0.5rem 0.25rem; }
+/* Headers wrap ("Stop backs" stacks) so all four columns fit a 390px phone
+   without the last one clipping off the edge. */
+.td-sc thead th { border-bottom: 1px solid var(--line); vertical-align: bottom; width: 22%; }
+.td-sc tbody td { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: var(--fs-caption); }
+.td-sc tbody td b { font-size: var(--fs-sub); }
+.td-sc tbody tr { border-bottom: 1px solid var(--line); }
+.td-sc tbody tr:last-child { border-bottom: 0; }
+.td-sc tbody tr.is-self { background: rgba(47, 107, 67, 0.09); }
+/* Names wrap rather than truncate — a crew dashboard that ellipsizes the rep
+   it's reporting on is useless to the person reading it. */
+.td-sc-name { text-align: left !important; font-weight: 600; width: 34%; padding-right: 0.5rem !important; }
+.td-sc-who { display: block; line-height: 1.25; }
+.td-sc-effort { display: block; height: 3px; background: var(--paper-3); border-radius: 2px; margin-top: 3px; overflow: hidden; }
+.td-sc-effort i { display: block; height: 100%; background: var(--c-muted); }
+.td-sc tbody tr.is-self .td-sc-effort i { background: var(--c-accent); }
+.td-sc-sort {
+  background: none; border: 0; font: inherit; font-size: var(--fs-caption); font-weight: 600;
+  color: var(--ink-soft); cursor: pointer; padding: 4px 0; min-height: 32px;
+  width: 100%; text-align: right; line-height: 1.2;
+}
+.td-sc-sort.is-on { color: var(--green-deep); }
+
+/* Shared chart tooltip. */
+.td-tip {
+  position: absolute; transform: translate(-50%, -100%);
+  background: var(--ink); color: var(--paper);
+  font-size: var(--fs-caption); padding: 5px 9px; border-radius: 8px;
+  pointer-events: none; z-index: 5; white-space: nowrap;
+  box-shadow: var(--shadow);
+}
+.td-tip[hidden] { display: none; }
+
+@media (max-width: 380px) {
+  .td-kpis { grid-template-columns: 1fr; }
+  .td-kpi.is-hero .td-kpi-val { font-size: 1.8rem; }
+}
 
 /* Team management (Profile → Team) */
 .team-card-head {

@@ -563,15 +563,29 @@
     </div>
   </div>
 
-  <!-- ===================== TEAM INSIGHTS MODAL ===================== -->
+  <!-- ============== TEAM INTELLIGENCE (dashboard modal) ==============
+       Full-screen crew dashboard: KPI row, funnel, closing windows, 30-day
+       trend, rep scorecard, and crew signals. All figures are AGGREGATES
+       already returned by get_team_overview — no raw leads ever cross reps.
+       Tabs swap sections in #tin-body; #tin-tip is the shared chart tooltip. -->
   <div class="modal-overlay" id="team-insights-modal" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tin-title">
+    <div class="modal modal-dash" role="dialog" aria-modal="true" aria-labelledby="tin-title">
       <button type="button" class="modal-x" id="tin-x" aria-label="Close">✕</button>
-      <div class="post-head">
-        <span class="avatar avatar-ai">🧠</span>
-        <div><span class="post-author" id="tin-title">Team Insights</span><span class="post-tag">Patterns to grow on</span></div>
+      <div class="td-head">
+        <span class="avatar avatar-team" id="tin-logo">🏢</span>
+        <div class="td-headtext">
+          <span class="post-author" id="tin-title">Team Intelligence</span>
+          <span class="post-tag" id="tin-sub">Crew performance · last 30 days</span>
+        </div>
       </div>
-      <div class="ti-rows" id="tin-body"></div>
+      <div class="td-tabs" id="tin-tabs" role="tablist" aria-label="Dashboard sections">
+        <button type="button" class="td-tab is-on" data-tdtab="overview" role="tab" aria-selected="true">Overview</button>
+        <button type="button" class="td-tab" data-tdtab="crew" role="tab" aria-selected="false">Crew</button>
+        <button type="button" class="td-tab" data-tdtab="timing" role="tab" aria-selected="false">Timing</button>
+        <button type="button" class="td-tab" data-tdtab="you" role="tab" aria-selected="false">You</button>
+      </div>
+      <div class="td-body" id="tin-body"></div>
+      <div class="td-tip" id="tin-tip" hidden aria-hidden="true"></div>
       <div class="modal-actions">
         <button type="button" class="primary" id="tin-close">Close</button>
       </div>
