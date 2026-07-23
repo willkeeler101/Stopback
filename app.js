@@ -1179,7 +1179,7 @@ function teamLeaderboardPost() {
       <div class="post-head team-post-head">
         ${teamLogoHtml(team, "avatar avatar-team")}
         <button type="button" class="team-title-btn" aria-label="Open ${escapeHtml(team.name)} team info">
-          <span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking · tap for info</span>
+          <span class="post-author">${escapeHtml(team.name)}</span><span class="post-tag">Team ranking</span>
         </button>
         <button type="button" class="team-insights-btn">📊 Insights</button>
       </div>
@@ -1729,12 +1729,65 @@ async function refreshFriendsOverview() {
   }
 }
 
-// Team Hub pane (right feed tab). Placeholder here — fully built in the
-// Team Hub phase; keeping a stub so setFeedTab never throws.
+// Team Hub pane (right feed tab): identity card, the team leaderboard
+// (relocated from the For You stream), and honest coming-soon tiles.
+// Rebuilt on every open/refresh — cheap, and keeps it in sync with
+// refreshTeams()/setActiveTeam() which both call renderFeed().
 function renderTeamHub() {
   const hub = document.getElementById("team-hub");
   if (!hub) return;
   hub.innerHTML = "";
+  const team = activeTeam();
+
+  if (!team) {
+    const empty = el(`
+      <article class="post hub-empty">
+        <span class="hub-empty-icon">🏢</span>
+        <span class="empty-title">No team yet</span>
+        <p class="post-body">Rankings, shared goals, and team wins live here.</p>
+        <button type="button" class="primary hub-join-btn">Join or create a team</button>
+      </article>`);
+    empty.querySelector(".hub-join-btn").onclick = () => switchView("teams");
+    hub.appendChild(empty);
+    return;
+  }
+
+  // Identity card — logo, name, members. Tap anywhere for full team info.
+  const members = team.member_count || 1;
+  const head = el(`
+    <article class="post hub-head">
+      ${teamLogoHtml(team, "avatar avatar-team hub-logo")}
+      <div class="hub-head-text">
+        <span class="hub-team-name">${escapeHtml(team.name)}</span>
+        <span class="post-tag">${members} member${members === 1 ? "" : "s"} · tap for info</span>
+      </div>
+    </article>`);
+  head.addEventListener("click", (e) => {
+    if (e.target.closest("button, a, input")) return;
+    openTeamInfo(team.id);
+  });
+  hub.appendChild(head);
+
+  // The team board — same self-contained builder the feed used to render.
+  const board = teamLeaderboardPost();
+  if (board) hub.appendChild(board);
+
+  // What's coming — muted, honest placeholders (no fake interactivity).
+  hub.appendChild(el(`
+    <article class="post hub-soon">
+      <div class="hub-soon-head">
+        <span class="post-author">More coming to your Team Hub</span>
+        <span class="soon-pill">Coming soon</span>
+      </div>
+      <div class="hub-grid">
+        <div class="hub-tile"><span class="hub-tile-icon">💬</span><span class="hub-tile-name">Team chat</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">📣</span><span class="hub-tile-name">Announcements</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">🎯</span><span class="hub-tile-name">Shared goals</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">🗺️</span><span class="hub-tile-name">Live territory map</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">🏆</span><span class="hub-tile-name">Team achievements</span></div>
+        <div class="hub-tile"><span class="hub-tile-icon">📊</span><span class="hub-tile-name">Team stats</span></div>
+      </div>
+    </article>`));
 }
 
 function renderFeed() {
@@ -1769,7 +1822,6 @@ function renderFeed() {
     goalPost(animate),
     pacePost(),
     hitListPost(),
-    teamLeaderboardPost(),
     ...interleave(mine, theirs),
     insightPost(),
     leaderboardPost(),

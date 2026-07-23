@@ -236,6 +236,40 @@ button, a, .chip, .nav-btn .bubble, input, select, textarea {
 .feed-stream { display: flex; flex-direction: column; gap: var(--sp-3); }
 #team-hub { display: flex; flex-direction: column; gap: var(--sp-3); }
 
+/* ===== Team Hub (right feed pane) ===== */
+.hub-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  text-align: center; padding: var(--sp-5) var(--sp-4);
+}
+.hub-empty-icon { font-size: 2.4rem; line-height: 1; }
+.hub-empty .post-body { color: var(--ink-soft); }
+.hub-empty .primary { margin-top: var(--sp-2); width: auto; padding: 0.7rem 1.4rem; }
+.hub-head { display: flex; align-items: center; gap: var(--sp-3); cursor: pointer; }
+.hub-logo { width: 52px; height: 52px; font-size: 1.5rem; }
+.hub-head-text { display: flex; flex-direction: column; min-width: 0; }
+.hub-team-name {
+  font-size: var(--fs-h2); font-weight: 800; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hub-soon-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-2); margin-bottom: var(--sp-3);
+}
+.soon-pill {
+  flex: none; font-size: var(--fs-micro); font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-soft); background: var(--paper-3);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0.25rem 0.6rem;
+}
+.hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.hub-tile {
+  display: flex; align-items: center; gap: var(--sp-2);
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: var(--sp-3);
+}
+.hub-tile-icon { font-size: 1.1rem; opacity: 0.4; }
+.hub-tile-name { font-size: var(--fs-sub); font-weight: 600; color: var(--ink-soft); }
+
 /* Post card */
 .post {
   background: var(--paper-2);
