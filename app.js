@@ -831,7 +831,7 @@ function hitListPost() {
         <span class="avatar avatar-ai big">🎯</span>
         <div>
           <span class="post-author hl-heading">Today's Hit List</span>
-          <span class="post-tag">Who to text, call, or stop back today</span>
+          <span class="post-tag">Text, call, or knock</span>
         </div>
       </div>
       <div class="hl-rows"></div>
