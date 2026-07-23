@@ -147,7 +147,9 @@ Keep this aesthetic in ALL future work — it's the brand.
 - Warm cream/papyrus bg (`--paper`), ink text (`--ink`), forest green wins
   (`--green`/`--green-deep`), dark red misses (`--red`), amber accents
   (`--amber`, sales ring).
-- **Fraunces** for headers (signature look), **Inter** for body.
+- **Inter everywhere** — ONE font family; hierarchy comes from the `--fs-*`
+  size tokens + weight (800 tight-tracked display, 700 titles, 600 labels,
+  400/500 body), never from a typeface change.
 - Spacing/type/shadow tokens in `:root` — reuse them, don't hardcode.
 - Cards: same radius/border/shadow everywhere; gentle enter animations;
   respect `prefers-reduced-motion`.
